@@ -1,5 +1,5 @@
 using System.Windows;
-using System.Windows.Input;
+using System.Windows.Markup;
 using DataRecoveryStudio.Application;
 using DataRecoveryStudio.Core;
 using DataRecoveryStudio.Infrastructure;
@@ -16,31 +16,52 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         viewModel.Settings.ThemeChanged += (_, theme) => ThemeManager.Apply(theme);
+        viewModel.Localization.Service.LanguageChanged += (_, _) => ApplyLanguage(viewModel.Localization.Service.LanguageCode);
+        ApplyLanguage(viewModel.Localization.Service.LanguageCode);
     }
-
-    private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ClickCount == 2) ToggleMaximized();
-        else if (e.LeftButton == MouseButtonState.Pressed) DragMove();
-    }
-
-    private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
-    private void Maximize_Click(object sender, RoutedEventArgs e) => ToggleMaximized();
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
-    private void ToggleMaximized() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
     public void ShowRecoveryDestinationDialog()
     {
         var session = _viewModel.Results.Session;
-        if (session is null || _viewModel.Results.SelectedCount == 0) return;
+        if (session is null || _viewModel.Results.SelectedCount == 0)
+        {
+            return;
+        }
 
+        var source = _viewModel.ScanMode.Source;
+        if (source?.Id != session.SourceDeviceId)
+        {
+            source = null;
+        }
+
+        var sourceName = source?.DisplayName ?? _viewModel.Localization["Destination.DevelopmentSource"];
+        var sourceLocation = source is null ? session.SourceDeviceId.Value : string.Join(", ", source.Volumes.Select(volume => volume.MountPath));
         IReadOnlyList<DestinationOption> options =
         [
-            new(session.SourceDeviceId, "Source device (blocked)", "E:\\Recovered Files", 80_000_000_000),
+            new(session.SourceDeviceId, sourceName, sourceLocation, 80_000_000_000),
             new(MockDeviceDiscoveryService.BackupDeviceId, "Archive drive", "F:\\Recovered Files", 1_100_000_000_000),
             new(new PhysicalDeviceId("mock:physical:network:safe-001"), "Recovery workspace", "R:\\Recovered Files", 350_000_000_000),
         ];
-        var viewModel = new DestinationViewModel(session.SourceDeviceId, _viewModel.Results.SelectedBytes, options);
+        var viewModel = new DestinationViewModel(
+            session.SourceDeviceId,
+            sourceName,
+            sourceLocation,
+            _viewModel.Results.SelectedBytes,
+            options,
+            _viewModel.Localization.Service);
         new RecoveryDestinationWindow(viewModel) { Owner = this }.ShowDialog();
+    }
+
+    private void ApplyLanguage(string languageCode)
+    {
+        void Apply() => Language = XmlLanguage.GetLanguage(languageCode);
+        if (Dispatcher.CheckAccess())
+        {
+            Apply();
+        }
+        else
+        {
+            Dispatcher.Invoke(Apply);
+        }
     }
 }

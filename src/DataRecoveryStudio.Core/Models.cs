@@ -116,6 +116,14 @@ public enum RecoverabilityStatus
     Unknown,
 }
 
+public enum PreviewState
+{
+    Supported,
+    Unsupported,
+    Missing,
+    Damaged,
+}
+
 public sealed record RecoverableFile(
     Guid Id,
     string Name,
@@ -125,7 +133,8 @@ public sealed record RecoverableFile(
     FileCategory Category,
     RecoverabilityStatus Recoverability,
     PhysicalDeviceId SourceDeviceId,
-    string PreviewDescription);
+    string PreviewDescription,
+    PreviewState PreviewState = PreviewState.Supported);
 
 public sealed record RecoveryRequest(
     Guid ScanSessionId,

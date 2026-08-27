@@ -7,13 +7,15 @@ public sealed class ScanModeViewModel : ObservableObject
     private readonly Action _goBack;
     private readonly Action<StorageDevice, ScanModeKind> _startScan;
     private StorageDevice? _source;
+    private ScanModeKind? _selectedMode;
 
     public ScanModeViewModel(Action goBack, Action<StorageDevice, ScanModeKind> startScan)
     {
         _goBack = goBack;
         _startScan = startScan;
         BackCommand = new RelayCommand(_goBack);
-        SelectModeCommand = new RelayCommand<ScanModeKind>(Start, _ => Source is not null);
+        SelectModeCommand = new RelayCommand<ScanModeKind>(SelectMode, _ => Source is not null);
+        StartScanCommand = new RelayCommand(Start, () => Source is not null && SelectedMode is not null);
     }
 
     public StorageDevice? Source
@@ -23,8 +25,10 @@ public sealed class ScanModeViewModel : ObservableObject
         {
             if (SetProperty(ref _source, value))
             {
+                SelectedMode = null;
                 OnPropertyChanged(nameof(SourceName));
                 SelectModeCommand.NotifyCanExecuteChanged();
+                StartScanCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -32,10 +36,30 @@ public sealed class ScanModeViewModel : ObservableObject
     public string SourceName => Source?.DisplayName ?? string.Empty;
     public RelayCommand BackCommand { get; }
     public RelayCommand<ScanModeKind> SelectModeCommand { get; }
+    public RelayCommand StartScanCommand { get; }
 
-    private void Start(ScanModeKind mode)
+    public ScanModeKind? SelectedMode
     {
-        if (Source is not null)
+        get => _selectedMode;
+        private set
+        {
+            if (SetProperty(ref _selectedMode, value))
+            {
+                OnPropertyChanged(nameof(IsStandardSelected));
+                OnPropertyChanged(nameof(IsDeepSelected));
+                StartScanCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool IsStandardSelected => SelectedMode == ScanModeKind.Standard;
+    public bool IsDeepSelected => SelectedMode == ScanModeKind.Deep;
+
+    private void SelectMode(ScanModeKind mode) => SelectedMode = mode;
+
+    private void Start()
+    {
+        if (Source is not null && SelectedMode is ScanModeKind mode)
         {
             _startScan(Source, mode);
         }
@@ -45,12 +69,13 @@ public sealed class ScanModeViewModel : ObservableObject
 public sealed class ScanProgressViewModel : ObservableObject
 {
     private readonly IScanService _scanService;
+    private readonly ILocalizationService? _localization;
     private readonly Action<ScanSession> _completed;
     private CancellationTokenSource? _cancellation;
     private StorageDevice? _source;
     private ScanModeKind _mode;
     private ScanState _state = ScanState.Idle;
-    private string _phase = "Preparing mock scan";
+    private string _phase;
     private double _percentage;
     private long _bytesScanned;
     private long _totalBytes;
@@ -59,19 +84,23 @@ public sealed class ScanProgressViewModel : ObservableObject
     private int _filesFound;
     private string? _errorMessage;
 
-    public ScanProgressViewModel(IScanService scanService, Action<ScanSession> completed)
+    public ScanProgressViewModel(IScanService scanService, Action<ScanSession> completed, ILocalizationService? localization = null)
     {
         _scanService = scanService;
         _completed = completed;
+        _localization = localization;
+        _phase = Localize("Progress.Phase.Preparing");
         CancelCommand = new RelayCommand(Cancel, () => State is ScanState.Starting or ScanState.Scanning);
     }
 
     public RelayCommand CancelCommand { get; }
     public string SourceName => _source?.DisplayName ?? string.Empty;
-    public string ModeName => _mode == ScanModeKind.Standard ? "Standard Scan" : "Deep Scan";
+    public string ModeName => _mode == ScanModeKind.Standard ? Localize("ScanMode.Standard") : Localize("ScanMode.Deep");
     public string AmountScanned => $"{ByteFormatter.Format(BytesScanned)} / {ByteFormatter.Format(TotalBytes)}";
     public string ElapsedText => FormatDuration(Elapsed);
-    public string RemainingText => EstimatedRemaining is null ? "Calculating…" : FormatDuration(EstimatedRemaining.Value);
+    public string RemainingText => EstimatedRemaining is null ? Localize("Progress.Calculating") : FormatDuration(EstimatedRemaining.Value);
+    public bool IsCanceling => State == ScanState.Canceling;
+    public bool CanCancel => State is ScanState.Starting or ScanState.Scanning;
 
     public ScanState State
     {
@@ -81,6 +110,8 @@ public sealed class ScanProgressViewModel : ObservableObject
             if (SetProperty(ref _state, value))
             {
                 CancelCommand.NotifyCanExecuteChanged();
+                OnPropertyChanged(nameof(IsCanceling));
+                OnPropertyChanged(nameof(CanCancel));
             }
         }
     }
@@ -130,7 +161,7 @@ public sealed class ScanProgressViewModel : ObservableObject
     private void ApplyProgress(ScanProgress progress)
     {
         State = progress.State;
-        Phase = progress.Phase;
+        Phase = Localize(progress.Phase);
         Percentage = progress.Percentage;
         BytesScanned = progress.BytesScanned;
         TotalBytes = progress.TotalBytes;
@@ -142,11 +173,13 @@ public sealed class ScanProgressViewModel : ObservableObject
     private void Cancel()
     {
         State = ScanState.Canceling;
-        Phase = "Canceling safely…";
+        Phase = Localize("Progress.Phase.Canceling");
         _cancellation?.Cancel();
     }
 
     private static string FormatDuration(TimeSpan duration) => duration.TotalHours >= 1
         ? duration.ToString(@"h\:mm\:ss")
         : duration.ToString(@"m\:ss");
+
+    private string Localize(string key) => _localization?[key] ?? key;
 }

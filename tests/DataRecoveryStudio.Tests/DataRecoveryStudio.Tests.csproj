@@ -1,12 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,12 +19,14 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="System.IO" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DataRecoveryStudio.Core\DataRecoveryStudio.Core.csproj" />
     <ProjectReference Include="..\..\src\DataRecoveryStudio.Application\DataRecoveryStudio.Application.csproj" />
     <ProjectReference Include="..\..\src\DataRecoveryStudio.Infrastructure\DataRecoveryStudio.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\DataRecoveryStudio.App\DataRecoveryStudio.App.csproj" />
   </ItemGroup>
 
 </Project>

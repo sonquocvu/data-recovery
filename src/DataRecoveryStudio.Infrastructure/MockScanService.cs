@@ -19,7 +19,7 @@ public sealed class MockScanService(TimeSpan? stepDelay = null, int stepCount = 
         var stopwatch = Stopwatch.StartNew();
         var total = Math.Max(1, source.CapacityBytes);
 
-        progress.Report(new ScanProgress(sessionId, ScanState.Starting, "Preparing read-only mock scan", 0, total, TimeSpan.Zero, null, 0));
+        progress.Report(new ScanProgress(sessionId, ScanState.Starting, "Progress.Phase.Preparing", 0, total, TimeSpan.Zero, null, 0));
 
         for (var step = 1; step <= _stepCount; step++)
         {
@@ -54,19 +54,19 @@ public sealed class MockScanService(TimeSpan? stepDelay = null, int stepCount = 
         {
             return ratio switch
             {
-                < 0.18 => "Reading mock volume metadata",
-                < 0.76 => "Reviewing deleted file records",
-                < 0.94 => "Reconstructing mock folder paths",
-                _ => "Finalizing the result catalog",
+                < 0.18 => "Progress.Phase.Metadata",
+                < 0.76 => "Progress.Phase.Records",
+                < 0.94 => "Progress.Phase.Paths",
+                _ => "Progress.Phase.Finalizing",
             };
         }
 
         return ratio switch
         {
-            < 0.12 => "Preparing mock signature catalog",
-            < 0.84 => "Matching simulated file signatures",
-            < 0.96 => "Validating mock file boundaries",
-            _ => "Finalizing the result catalog",
+            < 0.12 => "Progress.Phase.Signatures",
+            < 0.84 => "Progress.Phase.Matching",
+            < 0.96 => "Progress.Phase.Boundaries",
+            _ => "Progress.Phase.Finalizing",
         };
     }
 }

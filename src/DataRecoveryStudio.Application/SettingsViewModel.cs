@@ -9,18 +9,22 @@ public sealed class SettingsViewModel : ObservableObject
     private ThemePreference _theme;
     private string _languageCode = AppSettings.Default.LanguageCode;
 
-    public SettingsViewModel(ISettingsStore settingsStore, ILocalizationService localization)
+    public SettingsViewModel(ISettingsStore settingsStore, ILocalizationService localization, bool isDevelopmentMode = false)
     {
         _settingsStore = settingsStore;
         _localization = localization;
-        ThemeOptions = Enum.GetValues<ThemePreference>();
         LanguageOptions = [new("en-US", "English"), new("vi-VN", "Tiếng Việt")];
+        IsDevelopmentMode = isDevelopmentMode;
+        _localization.LanguageChanged += (_, _) => OnPropertyChanged(nameof(ThemeChoices));
     }
 
     public event EventHandler<ThemePreference>? ThemeChanged;
 
-    public IReadOnlyList<ThemePreference> ThemeOptions { get; }
+    public IReadOnlyList<ChoiceOption<ThemePreference>> ThemeChoices => Enum.GetValues<ThemePreference>()
+        .Select(value => new ChoiceOption<ThemePreference>(value, _localization[$"Theme.{value}"]))
+        .ToArray();
     public IReadOnlyList<LanguageOption> LanguageOptions { get; }
+    public bool IsDevelopmentMode { get; }
 
     public ThemePreference Theme
     {

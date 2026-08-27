@@ -20,6 +20,10 @@ public sealed class NavigationTests
 
         viewModel.Devices.SelectDeviceCommand.Execute(viewModel.Devices.Devices[1]);
 
+        Assert.Equal(PageKind.Devices, viewModel.CurrentPage);
+        Assert.True(viewModel.Devices.Devices[1].IsSelected);
+        viewModel.Devices.ContinueCommand.Execute(null);
+
         Assert.Equal(PageKind.ScanMode, viewModel.CurrentPage);
         Assert.Equal(viewModel.Devices.Devices[1].Device, viewModel.ScanMode.Source);
         Assert.Same(viewModel.ScanMode, viewModel.CurrentPageViewModel);

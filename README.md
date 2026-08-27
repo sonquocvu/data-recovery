@@ -12,3 +12,5 @@ dotnet run --project src/DataRecoveryStudio.App/DataRecoveryStudio.App.csproj -c
 ```
 
 See `docs/` for the product, architecture, safety rules, and phased roadmap.
+
+UI inspection and development-mode instructions are in `docs/ui-quality-assurance.md`.

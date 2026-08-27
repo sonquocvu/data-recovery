@@ -9,9 +9,10 @@ public static class ThemeManager
     public static void Apply(ThemePreference preference)
     {
         var effective = preference == ThemePreference.FollowSystem ? GetSystemPreference() : preference;
-        var source = effective == ThemePreference.Light
-            ? new Uri("Themes/LightTheme.xaml", UriKind.Relative)
-            : new Uri("Themes/DarkTheme.xaml", UriKind.Relative);
+        var themeFile = effective == ThemePreference.Light ? "LightTheme.xaml" : "DarkTheme.xaml";
+        var source = new Uri(
+            $"pack://application:,,,/DataRecoveryStudio;component/Themes/{themeFile}",
+            UriKind.Absolute);
         var dictionaries = System.Windows.Application.Current.Resources.MergedDictionaries;
         var current = dictionaries.FirstOrDefault(dictionary => dictionary.Source?.OriginalString.Contains("Theme.xaml", StringComparison.OrdinalIgnoreCase) == true);
         var replacement = new ResourceDictionary { Source = source };

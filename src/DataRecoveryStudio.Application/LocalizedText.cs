@@ -15,6 +15,9 @@ public sealed class LocalizedText : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    public ILocalizationService Service => _service;
+    public string this[string key] => Get(key);
+
     public string AppTitle => Get("App.Title");
     public string MockBadge => Get("App.MockBadge");
     public string NavDevices => Get("Nav.Devices");

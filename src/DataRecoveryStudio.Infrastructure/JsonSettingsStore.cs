@@ -7,14 +7,16 @@ public sealed class JsonSettingsStore : ISettingsStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private readonly string _filePath;
+    private readonly IStructuredLogger? _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public JsonSettingsStore(string? filePath = null)
+    public JsonSettingsStore(string? filePath = null, IStructuredLogger? logger = null)
     {
         _filePath = filePath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "DataRecoveryStudio",
             "settings.json");
+        _logger = logger;
     }
 
     public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken)
@@ -31,12 +33,14 @@ public sealed class JsonSettingsStore : ISettingsStore
             var settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions, cancellationToken).ConfigureAwait(false);
             return Normalize(settings);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
+            await LogLoadFailureAsync(exception, "InvalidJson", cancellationToken).ConfigureAwait(false);
             return AppSettings.Default;
         }
-        catch (IOException)
+        catch (IOException exception)
         {
+            await LogLoadFailureAsync(exception, "ReadFailure", cancellationToken).ConfigureAwait(false);
             return AppSettings.Default;
         }
         finally
@@ -76,5 +80,31 @@ public sealed class JsonSettingsStore : ISettingsStore
 
         var language = settings.LanguageCode is "vi-VN" ? "vi-VN" : "en-US";
         return settings with { LanguageCode = language };
+    }
+
+    private async Task LogLoadFailureAsync(Exception exception, string reason, CancellationToken cancellationToken)
+    {
+        if (_logger is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _logger.LogAsync(
+                "Warning",
+                "SettingsLoadFailed",
+                new Dictionary<string, object?>
+                {
+                    ["reason"] = reason,
+                    ["exceptionType"] = exception.GetType().FullName,
+                    ["message"] = exception.Message,
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception loggingException) when (loggingException is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Debug.WriteLine($"Unable to write settings diagnostic: {loggingException.Message}");
+        }
     }
 }

@@ -20,15 +20,17 @@ public sealed class MainViewModel : ObservableObject
         IScanService scan,
         IRecoveryCatalogService catalog,
         ISettingsStore settings,
-        ILocalizationService localization)
+        ILocalizationService localization,
+        bool isDevelopmentMode = false)
     {
         Localization = new LocalizedText(localization);
         ScanMode = new ScanModeViewModel(() => Navigate(PageKind.Devices), BeginScan);
-        ScanProgress = new ScanProgressViewModel(scan, ScanFinished);
-        Results = new ResultsViewModel(catalog);
-        Settings = new SettingsViewModel(settings, localization);
-        Devices = new DeviceSelectionViewModel(devices, SelectDevice);
+        ScanProgress = new ScanProgressViewModel(scan, ScanFinished, localization);
+        Results = new ResultsViewModel(catalog, isDevelopmentMode, localization);
+        Settings = new SettingsViewModel(settings, localization, isDevelopmentMode);
+        Devices = new DeviceSelectionViewModel(devices, SelectDevice, localization);
         NavigateCommand = new RelayCommand<PageKind>(Navigate);
+        ShowLargeDatasetCommand = new RelayCommand(ShowLargeDataset, () => Results.IsDevelopmentMode);
     }
 
     public LocalizedText Localization { get; }
@@ -38,6 +40,7 @@ public sealed class MainViewModel : ObservableObject
     public ResultsViewModel Results { get; }
     public SettingsViewModel Settings { get; }
     public RelayCommand<PageKind> NavigateCommand { get; }
+    public RelayCommand ShowLargeDatasetCommand { get; }
 
     public PageKind CurrentPage
     {
@@ -47,6 +50,9 @@ public sealed class MainViewModel : ObservableObject
             if (SetProperty(ref _currentPage, value))
             {
                 OnPropertyChanged(nameof(CurrentPageViewModel));
+                OnPropertyChanged(nameof(IsDevicesSelected));
+                OnPropertyChanged(nameof(IsResultsSelected));
+                OnPropertyChanged(nameof(IsSettingsSelected));
             }
         }
     }
@@ -59,6 +65,10 @@ public sealed class MainViewModel : ObservableObject
         PageKind.Settings => Settings,
         _ => Devices,
     };
+
+    public bool IsDevicesSelected => CurrentPage is PageKind.Devices or PageKind.ScanMode or PageKind.ScanProgress;
+    public bool IsResultsSelected => CurrentPage == PageKind.Results;
+    public bool IsSettingsSelected => CurrentPage == PageKind.Settings;
 
     public async Task InitializeAsync()
     {
@@ -84,5 +94,11 @@ public sealed class MainViewModel : ObservableObject
     {
         CurrentPage = PageKind.Results;
         _ = Results.LoadAsync(session);
+    }
+
+    private void ShowLargeDataset()
+    {
+        Results.GenerateLargeMockDataset();
+        CurrentPage = PageKind.Results;
     }
 }

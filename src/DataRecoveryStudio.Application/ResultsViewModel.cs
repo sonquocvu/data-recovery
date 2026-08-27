@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using DataRecoveryStudio.Core;
 
 namespace DataRecoveryStudio.Application;
@@ -20,13 +21,17 @@ public enum ResultSort
     Recoverability,
 }
 
+public sealed record ChoiceOption<T>(T Value, string DisplayName);
+
 public sealed class ResultItemViewModel : ObservableObject
 {
     private bool _isSelected;
+    private readonly ILocalizationService? _localization;
 
-    public ResultItemViewModel(RecoverableFile file)
+    public ResultItemViewModel(RecoverableFile file, ILocalizationService? localization = null)
     {
         File = file;
+        _localization = localization;
         var visual = RecoverabilityVisual.From(file.Recoverability);
         StatusLabelKey = visual.LabelKey;
         StatusTone = visual.Tone;
@@ -36,17 +41,35 @@ public sealed class ResultItemViewModel : ObservableObject
     public string Name => File.Name;
     public string OriginalPath => File.OriginalPath;
     public string Size => ByteFormatter.Format(File.SizeBytes);
-    public string Modified => File.ModifiedAt?.LocalDateTime.ToString("g") ?? "Unknown";
-    public string Category => File.Category.ToString();
-    public string Status => File.Recoverability.ToString();
+    public string Modified => File.ModifiedAt?.LocalDateTime.ToString("g") ?? Localize("Common.Unknown", "Unknown");
+    public string Category => Localize($"Category.{File.Category}", File.Category.ToString());
+    public string Status => Localize(StatusLabelKey, File.Recoverability.ToString());
     public string StatusLabelKey { get; }
     public string StatusTone { get; }
-    public string PreviewDescription => File.PreviewDescription;
+    public string PreviewDescription => Localize($"Preview.Description.{File.Category}", File.PreviewDescription);
+    public bool IsExcellent => File.Recoverability == RecoverabilityStatus.Excellent;
+    public bool IsGood => File.Recoverability == RecoverabilityStatus.Good;
+    public bool IsPoor => File.Recoverability == RecoverabilityStatus.Poor;
+    public bool IsUnknown => File.Recoverability == RecoverabilityStatus.Unknown;
+    public bool HasSupportedPreview => File.PreviewState == PreviewState.Supported;
+    public bool HasUnsupportedPreview => File.PreviewState == PreviewState.Unsupported;
+    public bool HasMissingPreview => File.PreviewState == PreviewState.Missing;
+    public bool HasDamagedPreview => File.PreviewState == PreviewState.Damaged;
 
     public bool IsSelected
     {
         get => _isSelected;
         set => SetProperty(ref _isSelected, value);
+    }
+
+    private string Localize(string key, string fallback) => _localization?[key] ?? fallback;
+
+    public void RefreshLocalizedText()
+    {
+        OnPropertyChanged(nameof(Status));
+        OnPropertyChanged(nameof(Category));
+        OnPropertyChanged(nameof(Modified));
+        OnPropertyChanged(nameof(PreviewDescription));
     }
 }
 
@@ -60,19 +83,43 @@ public sealed class ResultsViewModel : ObservableObject
     private ResultItemViewModel? _selectedItem;
     private ResultsDisplayState _state = ResultsDisplayState.Empty;
     private ScanSession? _session;
+    private readonly bool _isDevelopmentMode;
+    private readonly ILocalizationService? _localization;
+    private double _lastFilterDurationMilliseconds;
 
-    public ResultsViewModel(IRecoveryCatalogService catalog)
+    public ResultsViewModel(IRecoveryCatalogService catalog, bool isDevelopmentMode = false, ILocalizationService? localization = null)
     {
         _catalog = catalog;
+        _isDevelopmentMode = isDevelopmentMode;
+        _localization = localization;
+        if (_localization is not null)
+        {
+            _localization.LanguageChanged += (_, _) =>
+            {
+                OnPropertyChanged(nameof(CategoryOptions));
+                OnPropertyChanged(nameof(SortChoices));
+                foreach (var item in _allResults)
+                {
+                    item.RefreshLocalizedText();
+                }
+            };
+        }
         SelectCategoryCommand = new RelayCommand<FileCategory>(category => SelectedCategory = category);
         SetDemoStateCommand = new RelayCommand<string>(SetDemoState);
+        GenerateLargeDatasetCommand = new RelayCommand(GenerateLargeMockDataset, () => IsDevelopmentMode);
     }
 
-    public ObservableCollection<ResultItemViewModel> VisibleResults { get; } = [];
-    public IReadOnlyList<FileCategory> Categories { get; } = Enum.GetValues<FileCategory>();
-    public IReadOnlyList<ResultSort> SortOptions { get; } = Enum.GetValues<ResultSort>();
+    public BulkObservableCollection<ResultItemViewModel> VisibleResults { get; } = [];
+    public IReadOnlyList<ChoiceOption<FileCategory>> CategoryOptions => Enum.GetValues<FileCategory>()
+        .Select(value => new ChoiceOption<FileCategory>(value, Localize($"Category.{value}", value.ToString())))
+        .ToArray();
+    public IReadOnlyList<ChoiceOption<ResultSort>> SortChoices => Enum.GetValues<ResultSort>()
+        .Select(value => new ChoiceOption<ResultSort>(value, Localize($"Sort.{value}", value.ToString())))
+        .ToArray();
     public RelayCommand<FileCategory> SelectCategoryCommand { get; }
     public RelayCommand<string> SetDemoStateCommand { get; }
+    public RelayCommand GenerateLargeDatasetCommand { get; }
+    public bool IsDevelopmentMode => _isDevelopmentMode;
     public ScanSession? Session => _session;
     public int TotalCount => _allResults.Count;
     public int VisibleCount => VisibleResults.Count;
@@ -81,6 +128,11 @@ public sealed class ResultsViewModel : ObservableObject
     public string SelectedSize => ByteFormatter.Format(SelectedBytes);
     public bool CanRecover => SelectedCount > 0 && Session is not null;
     public IReadOnlyList<RecoverableFile> SelectedFiles => _allResults.Where(item => item.IsSelected).Select(item => item.File).ToArray();
+    public double LastFilterDurationMilliseconds
+    {
+        get => _lastFilterDurationMilliseconds;
+        private set => SetProperty(ref _lastFilterDurationMilliseconds, value);
+    }
 
     public string SearchText
     {
@@ -121,8 +173,16 @@ public sealed class ResultsViewModel : ObservableObject
     public ResultItemViewModel? SelectedItem
     {
         get => _selectedItem;
-        set => SetProperty(ref _selectedItem, value);
+        set
+        {
+            if (SetProperty(ref _selectedItem, value))
+            {
+                OnPropertyChanged(nameof(HasSelectedItem));
+            }
+        }
     }
+
+    public bool HasSelectedItem => SelectedItem is not null;
 
     public ResultsDisplayState State
     {
@@ -153,7 +213,7 @@ public sealed class ResultsViewModel : ObservableObject
         if (session.State == ScanState.Canceled)
         {
             _allResults.Clear();
-            VisibleResults.Clear();
+            VisibleResults.ReplaceAll([]);
             State = ResultsDisplayState.Canceled;
             NotifyCounts();
             return;
@@ -162,7 +222,7 @@ public sealed class ResultsViewModel : ObservableObject
         if (session.State == ScanState.Failed)
         {
             _allResults.Clear();
-            VisibleResults.Clear();
+            VisibleResults.ReplaceAll([]);
             State = ResultsDisplayState.Failed;
             NotifyCounts();
             return;
@@ -176,7 +236,7 @@ public sealed class ResultsViewModel : ObservableObject
     public void LoadFiles(IEnumerable<RecoverableFile> files)
     {
         _allResults.Clear();
-        _allResults.AddRange(files.Select(file => new ResultItemViewModel(file)));
+        _allResults.AddRange(files.Select(file => new ResultItemViewModel(file, _localization)));
         foreach (var item in _allResults)
         {
             item.PropertyChanged += (_, args) =>
@@ -194,8 +254,49 @@ public sealed class ResultsViewModel : ObservableObject
 
     public void ShowCompletedDemo() => State = _allResults.Count == 0 ? ResultsDisplayState.Empty : ResultsDisplayState.Completed;
 
+    public void GenerateLargeMockDataset()
+    {
+        if (!IsDevelopmentMode)
+        {
+            return;
+        }
+
+        var source = new PhysicalDeviceId("mock:physical:development:large-catalog");
+        _session = new ScanSession(Guid.NewGuid(), source, ScanModeKind.Deep, DateTimeOffset.UtcNow, ScanState.Completed);
+        OnPropertyChanged(nameof(Session));
+        var categories = new[] { FileCategory.Image, FileCategory.Document, FileCategory.Video, FileCategory.Audio, FileCategory.Archive, FileCategory.Unknown };
+        var statuses = Enum.GetValues<RecoverabilityStatus>();
+        var previews = Enum.GetValues<PreviewState>();
+        var files = Enumerable.Range(1, 10_000).Select(index =>
+        {
+            var category = categories[index % categories.Length];
+            var extension = category switch
+            {
+                FileCategory.Image => ".jpg",
+                FileCategory.Document => ".docx",
+                FileCategory.Video => ".mp4",
+                FileCategory.Audio => ".flac",
+                FileCategory.Archive => ".zip",
+                _ => ".bin",
+            };
+            return new RecoverableFile(
+                Guid.NewGuid(),
+                $"Mock recovered file {index:00000}{extension}",
+                $@"Development\Large catalog\Batch {index / 250:00}\",
+                24_000L + index * 8_193L,
+                DateTimeOffset.Now.AddMinutes(-index),
+                category,
+                statuses[index % statuses.Length],
+                source,
+                "Generated preview state for responsiveness testing.",
+                previews[index % previews.Length]);
+        });
+        LoadFiles(files);
+    }
+
     private void ApplyFilterAndSort()
     {
+        var stopwatch = Stopwatch.StartNew();
         IEnumerable<ResultItemViewModel> query = _allResults;
         if (SelectedCategory != FileCategory.All)
         {
@@ -217,12 +318,10 @@ public sealed class ResultsViewModel : ObservableObject
             _ => query.OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase),
         };
 
-        VisibleResults.Clear();
-        foreach (var item in query)
-        {
-            VisibleResults.Add(item);
-        }
+        VisibleResults.ReplaceAll(query);
 
+        stopwatch.Stop();
+        LastFilterDurationMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
         NotifyCounts();
     }
 
@@ -241,4 +340,6 @@ public sealed class ResultsViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedFiles));
         OnPropertyChanged(nameof(CanRecover));
     }
+
+    private string Localize(string key, string fallback) => _localization?[key] ?? fallback;
 }

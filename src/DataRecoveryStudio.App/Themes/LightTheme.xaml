@@ -13,16 +13,27 @@
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#172033" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#52627A" />
     <SolidColorBrush x:Key="TextTertiaryBrush" Color="#75849A" />
+    <SolidColorBrush x:Key="TextDisabledBrush" Color="#A0AABA" />
+    <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="AccentBrush" Color="#336DF4" />
     <SolidColorBrush x:Key="AccentHoverBrush" Color="#245FD9" />
     <SolidColorBrush x:Key="AccentPressedBrush" Color="#174DBA" />
     <SolidColorBrush x:Key="AccentSubtleBrush" Color="#E6EEFF" />
     <SolidColorBrush x:Key="AccentTextBrush" Color="#245CCB" />
     <SolidColorBrush x:Key="FocusBrush" Color="#087EA4" />
+    <SolidColorBrush x:Key="SelectedBrush" Color="#E6EEFF" />
+    <SolidColorBrush x:Key="SelectedBorderBrush" Color="#336DF4" />
+    <SolidColorBrush x:Key="InformationBrush" Color="#096C91" />
+    <SolidColorBrush x:Key="InformationSubtleBrush" Color="#DDF4FF" />
     <SolidColorBrush x:Key="PositiveBrush" Color="#128763" />
     <SolidColorBrush x:Key="PositiveSubtleBrush" Color="#DDF7ED" />
     <SolidColorBrush x:Key="WarningBrush" Color="#9B6711" />
     <SolidColorBrush x:Key="WarningSubtleBrush" Color="#FFF1CC" />
     <SolidColorBrush x:Key="CriticalBrush" Color="#C53048" />
     <SolidColorBrush x:Key="CriticalSubtleBrush" Color="#FFE4E8" />
+    <SolidColorBrush x:Key="RecoverabilityExcellentBrush" Color="#128763" />
+    <SolidColorBrush x:Key="RecoverabilityGoodBrush" Color="#245CCB" />
+    <SolidColorBrush x:Key="RecoverabilityPoorBrush" Color="#C53048" />
+    <SolidColorBrush x:Key="RecoverabilityUnknownBrush" Color="#52627A" />
+    <SolidColorBrush x:Key="OverlayBrush" Color="#DDF4F7FB" />
 </ResourceDictionary>

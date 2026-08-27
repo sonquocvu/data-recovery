@@ -7,6 +7,7 @@ public sealed class MockDeviceDiscoveryService : IDeviceDiscoveryService
     public static readonly PhysicalDeviceId InternalDeviceId = new("mock:physical:nvme:system-001");
     public static readonly PhysicalDeviceId UsbDeviceId = new("mock:physical:usb:travel-042");
     public static readonly PhysicalDeviceId BackupDeviceId = new("mock:physical:usb:backup-903");
+    public static readonly PhysicalDeviceId DisconnectedDeviceId = new("mock:physical:usb:offline-117");
 
     public Task<IReadOnlyList<StorageDevice>> GetDevicesAsync(CancellationToken cancellationToken)
     {
@@ -34,6 +35,13 @@ public sealed class MockDeviceDiscoveryService : IDeviceDiscoveryService
                 StorageDeviceType.External,
                 DeviceConnectionStatus.Online,
                 [new Volume("mock-volume-f", "F:\\", "ARCHIVE", "NTFS", 2_000_398_934_016, 881_274_650_624, BackupDeviceId)]),
+            new(
+                DisconnectedDeviceId,
+                "Camera card",
+                "Field SDXC 64 GB",
+                StorageDeviceType.RemovableUsb,
+                DeviceConnectionStatus.Disconnected,
+                [new Volume("mock-volume-g", "G:\\", "CAMERA", "FAT32", 64_021_856_256, 48_016_392_192, DisconnectedDeviceId)]),
         ];
 
         return Task.FromResult(devices);

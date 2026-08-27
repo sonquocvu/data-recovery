@@ -17,6 +17,8 @@ public sealed class JsonLineStructuredLogger : IStructuredLogger
             $"application-{DateTime.UtcNow:yyyyMMdd}.jsonl");
     }
 
+    public string LogPath => _logPath;
+
     public async ValueTask LogAsync(
         string level,
         string eventName,

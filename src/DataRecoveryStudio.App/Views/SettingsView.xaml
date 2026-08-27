@@ -1,35 +1,41 @@
 <UserControl x:Class="DataRecoveryStudio.App.Views.SettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="44,36" MaxWidth="860" HorizontalAlignment="Left">
-            <TextBlock Text="{Binding DataContext.Localization.SettingsTitle, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageTitleStyle}" />
-            <TextBlock Text="Personalize the interface. Changes are saved locally and never written to a source device." Style="{StaticResource PageSubtitleStyle}" Margin="0,9,0,26" />
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="{StaticResource PageMargin}" MaxWidth="860" HorizontalAlignment="Left">
+            <TextBlock Text="{Binding DataContext.Localization[Settings.Title], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="{Binding DataContext.Localization[Settings.Subtitle], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,8,0,24" />
 
-            <Border Style="{StaticResource PanelStyle}" Padding="24" Margin="0,0,0,18">
+            <Border Style="{StaticResource PanelStyle}" Padding="22" Margin="0,0,0,16">
                 <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="260" /></Grid.ColumnDefinitions>
-                    <StackPanel><TextBlock Text="{Binding DataContext.Localization.Appearance, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="17" FontWeight="SemiBold" /><TextBlock Text="Choose light, dark, or follow the Windows app theme." Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,7,20,0" TextWrapping="Wrap" /></StackPanel>
-                    <ComboBox Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedItem="{Binding Theme}" VerticalAlignment="Center" AutomationProperties.Name="Theme preference" />
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="250" /></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="{Binding DataContext.Localization[Settings.Appearance], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding DataContext.Localization[Settings.AppearanceBody], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,6,24,0" /></StackPanel>
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding ThemeChoices}" DisplayMemberPath="DisplayName" SelectedValuePath="Value" SelectedValue="{Binding Theme}" VerticalAlignment="Center" AutomationProperties.Name="{Binding DataContext.Localization[Settings.Appearance], RelativeSource={RelativeSource AncestorType=Window}}" />
                 </Grid>
             </Border>
-            <Border Style="{StaticResource PanelStyle}" Padding="24" Margin="0,0,0,18">
+            <Border Style="{StaticResource PanelStyle}" Padding="22" Margin="0,0,0,16">
                 <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="260" /></Grid.ColumnDefinitions>
-                    <StackPanel><TextBlock Text="{Binding DataContext.Localization.Language, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="17" FontWeight="SemiBold" /><TextBlock Text="Primary navigation and page content update immediately." Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,7,20,0" TextWrapping="Wrap" /></StackPanel>
-                    <ComboBox Grid.Column="1" ItemsSource="{Binding LanguageOptions}" DisplayMemberPath="DisplayName" SelectedValuePath="Code" SelectedValue="{Binding LanguageCode}" VerticalAlignment="Center" AutomationProperties.Name="Application language" />
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="250" /></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="{Binding DataContext.Localization[Settings.Language], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding DataContext.Localization[Settings.LanguageBody], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,6,24,0" /></StackPanel>
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding LanguageOptions}" DisplayMemberPath="DisplayName" SelectedValuePath="Code" SelectedValue="{Binding LanguageCode}" VerticalAlignment="Center" AutomationProperties.Name="{Binding DataContext.Localization[Settings.Language], RelativeSource={RelativeSource AncestorType=Window}}" />
                 </Grid>
             </Border>
-            <Border Style="{StaticResource PanelStyle}" Padding="24">
+
+            <Border Style="{StaticResource PanelStyle}" Padding="22" Visibility="{Binding IsDevelopmentMode, Converter={StaticResource BoolToVisibilityConverter}}">
                 <StackPanel>
-                    <TextBlock Text="Development state previews" FontSize="17" FontWeight="SemiBold" />
-                    <TextBlock Text="Demonstrate results states without accessing a device. These controls affect only the mock results page." Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,7,0,16" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding DataContext.Localization[Settings.Development], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource SectionTitleStyle}" />
+                        <Border Background="{DynamicResource WarningSubtleBrush}" CornerRadius="{StaticResource RadiusSmall}" Padding="8,4" Margin="10,0,0,0"><TextBlock Text="{Binding DataContext.Localization[Settings.DevelopmentBadge], RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{DynamicResource WarningBrush}" FontSize="9" FontWeight="SemiBold" /></Border>
+                    </StackPanel>
+                    <TextBlock Text="{Binding DataContext.Localization[Settings.DevelopmentBody], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,7,0,16" />
                     <WrapPanel>
-                        <Button Content="Completed" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Completed" />
-                        <Button Content="Empty" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Empty" />
-                        <Button Content="Loading" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Loading" />
-                        <Button Content="Canceled" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Canceled" />
-                        <Button Content="Failed" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Failed" />
+                        <Button Content="{Binding DataContext.Localization[Settings.State.Completed], RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Completed" />
+                        <Button Content="{Binding DataContext.Localization[Settings.State.Empty], RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Empty" />
+                        <Button Content="{Binding DataContext.Localization[Settings.State.Loading], RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Loading" />
+                        <Button Content="{Binding DataContext.Localization[Settings.State.Canceled], RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Canceled" />
+                        <Button Content="{Binding DataContext.Localization[Settings.State.Failed], RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Failed" />
                     </WrapPanel>
+                    <Border Height="1" Background="{DynamicResource DividerBrush}" Margin="0,10,0,16" />
+                    <Button Content="{Binding DataContext.Localization[Settings.GenerateLarge], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding DataContext.ShowLargeDatasetCommand, RelativeSource={RelativeSource AncestorType=Window}}" HorizontalAlignment="Left" />
                 </StackPanel>
             </Border>
         </StackPanel>

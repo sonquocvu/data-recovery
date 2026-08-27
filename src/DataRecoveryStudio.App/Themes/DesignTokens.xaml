@@ -1,0 +1,30 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <sys:Double x:Key="Space4">4</sys:Double>
+    <sys:Double x:Key="Space8">8</sys:Double>
+    <sys:Double x:Key="Space12">12</sys:Double>
+    <sys:Double x:Key="Space16">16</sys:Double>
+    <sys:Double x:Key="Space20">20</sys:Double>
+    <sys:Double x:Key="Space24">24</sys:Double>
+    <sys:Double x:Key="Space32">32</sys:Double>
+    <sys:Double x:Key="Space40">40</sys:Double>
+    <Thickness x:Key="PageMargin">32,28,32,32</Thickness>
+    <CornerRadius x:Key="RadiusSmall">6</CornerRadius>
+    <CornerRadius x:Key="RadiusMedium">10</CornerRadius>
+    <CornerRadius x:Key="RadiusLarge">14</CornerRadius>
+    <CornerRadius x:Key="RadiusXLarge">18</CornerRadius>
+    <sys:Double x:Key="FontCaption">11</sys:Double>
+    <sys:Double x:Key="FontBody">13</sys:Double>
+    <sys:Double x:Key="FontSubtitle">15</sys:Double>
+    <sys:Double x:Key="FontSection">18</sys:Double>
+    <sys:Double x:Key="FontTitle">28</sys:Double>
+    <sys:Double x:Key="ControlHeightSmall">32</sys:Double>
+    <sys:Double x:Key="ControlHeight">40</sys:Double>
+    <sys:Double x:Key="ControlHeightLarge">46</sys:Double>
+    <sys:Double x:Key="IconSmall">16</sys:Double>
+    <sys:Double x:Key="IconMedium">20</sys:Double>
+    <sys:Double x:Key="IconLarge">28</sys:Double>
+    <DropShadowEffect x:Key="ElevationLow" BlurRadius="12" ShadowDepth="2" Opacity="0.14" Color="#000000" />
+    <DropShadowEffect x:Key="ElevationMedium" BlurRadius="22" ShadowDepth="5" Opacity="0.18" Color="#000000" />
+</ResourceDictionary>

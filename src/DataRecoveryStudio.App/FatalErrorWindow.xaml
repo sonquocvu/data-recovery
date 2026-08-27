@@ -1,0 +1,16 @@
+<Window x:Class="DataRecoveryStudio.App.FatalErrorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding Title, Mode=OneWay}" Width="620" Height="300" MinWidth="520" MinHeight="260"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource WindowBackgroundBrush}" Foreground="{DynamicResource TextPrimaryBrush}">
+    <Grid Margin="28">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+        <StackPanel Orientation="Horizontal">
+            <Path Data="{StaticResource IconWarning}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource CriticalBrush}" Width="26" Height="26" Margin="0,0,12,0" />
+            <TextBlock Text="{Binding Title, Mode=OneWay}" Style="{StaticResource PageTitleStyle}" Foreground="{DynamicResource CriticalBrush}" />
+        </StackPanel>
+        <TextBlock Grid.Row="1" Text="{Binding Message, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,18,0,20" TextWrapping="Wrap" />
+        <Button Grid.Row="2" Content="{Binding AffirmativeLabel, Mode=OneWay}" Style="{StaticResource PrimaryButtonStyle}" IsDefault="True" IsCancel="True" HorizontalAlignment="Right" MinWidth="110" />
+    </Grid>
+</Window>
