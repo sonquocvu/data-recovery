@@ -1,0 +1,46 @@
+<UserControl x:Class="DataRecoveryStudio.App.Views.ScanModeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:core="clr-namespace:DataRecoveryStudio.Core;assembly=DataRecoveryStudio.Core">
+    <Grid Margin="46,38" MaxWidth="1000" HorizontalAlignment="Center" VerticalAlignment="Top">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+        <StackPanel>
+            <Button Content="← Back" Command="{Binding BackCommand}" HorizontalAlignment="Left" Padding="12,7" />
+            <TextBlock Text="{Binding DataContext.Localization.ScanModeTitle, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageTitleStyle}" Margin="0,24,0,0" />
+            <TextBlock Text="{Binding DataContext.Localization.ScanModeSubtitle, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,9,0,0" MaxWidth="700" />
+        </StackPanel>
+        <Border Grid.Row="1" Style="{StaticResource SubtlePanelStyle}" Margin="0,24,0,0" Padding="16,12">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Selected device" Foreground="{DynamicResource TextSecondaryBrush}" /><TextBlock Text="{Binding SourceName}" Margin="10,0,0,0" FontWeight="SemiBold" /></StackPanel>
+        </Border>
+        <Grid Grid.Row="2" Margin="0,24,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="22" /><ColumnDefinition /></Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Style="{StaticResource PanelStyle}" Padding="28">
+                <StackPanel>
+                    <Border Width="52" Height="52" CornerRadius="14" Background="{DynamicResource AccentSubtleBrush}" HorizontalAlignment="Left">
+                        <TextBlock Text="⌁" FontSize="27" Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="{Binding DataContext.Localization.StandardTitle, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="21" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="{Binding DataContext.Localization.StandardBody, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,10,0,0" />
+                    <Border Background="{DynamicResource PositiveSubtleBrush}" CornerRadius="8" Padding="11,8" Margin="0,20,0,0">
+                        <TextBlock Text="Faster · best chance to preserve paths and names" Foreground="{DynamicResource PositiveBrush}" FontSize="12" TextWrapping="Wrap" />
+                    </Border>
+                    <Button Content="Start Standard Scan" Style="{StaticResource PrimaryButtonStyle}" Margin="0,26,0,0"
+                            Command="{Binding SelectModeCommand}" CommandParameter="{x:Static core:ScanModeKind.Standard}" />
+                </StackPanel>
+            </Border>
+            <Border Grid.Column="2" Style="{StaticResource PanelStyle}" Padding="28">
+                <StackPanel>
+                    <Border Width="52" Height="52" CornerRadius="14" Background="{DynamicResource AccentSubtleBrush}" HorizontalAlignment="Left">
+                        <TextBlock Text="◉" FontSize="22" Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="{Binding DataContext.Localization.DeepTitle, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="21" FontWeight="SemiBold" Margin="0,22,0,0" />
+                    <TextBlock Text="{Binding DataContext.Localization.DeepBody, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,10,0,0" />
+                    <Border Background="{DynamicResource WarningSubtleBrush}" CornerRadius="8" Padding="11,8" Margin="0,20,0,0">
+                        <TextBlock Text="More thorough · names and folders may be missing" Foreground="{DynamicResource WarningBrush}" FontSize="12" TextWrapping="Wrap" />
+                    </Border>
+                    <Button Content="Start Deep Scan" Style="{StaticResource PrimaryButtonStyle}" Margin="0,26,0,0"
+                            Command="{Binding SelectModeCommand}" CommandParameter="{x:Static core:ScanModeKind.Deep}" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

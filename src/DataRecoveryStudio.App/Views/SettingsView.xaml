@@ -1,0 +1,37 @@
+<UserControl x:Class="DataRecoveryStudio.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="44,36" MaxWidth="860" HorizontalAlignment="Left">
+            <TextBlock Text="{Binding DataContext.Localization.SettingsTitle, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="Personalize the interface. Changes are saved locally and never written to a source device." Style="{StaticResource PageSubtitleStyle}" Margin="0,9,0,26" />
+
+            <Border Style="{StaticResource PanelStyle}" Padding="24" Margin="0,0,0,18">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="260" /></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="{Binding DataContext.Localization.Appearance, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="17" FontWeight="SemiBold" /><TextBlock Text="Choose light, dark, or follow the Windows app theme." Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,7,20,0" TextWrapping="Wrap" /></StackPanel>
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedItem="{Binding Theme}" VerticalAlignment="Center" AutomationProperties.Name="Theme preference" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource PanelStyle}" Padding="24" Margin="0,0,0,18">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="260" /></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="{Binding DataContext.Localization.Language, RelativeSource={RelativeSource AncestorType=Window}}" FontSize="17" FontWeight="SemiBold" /><TextBlock Text="Primary navigation and page content update immediately." Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,7,20,0" TextWrapping="Wrap" /></StackPanel>
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding LanguageOptions}" DisplayMemberPath="DisplayName" SelectedValuePath="Code" SelectedValue="{Binding LanguageCode}" VerticalAlignment="Center" AutomationProperties.Name="Application language" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource PanelStyle}" Padding="24">
+                <StackPanel>
+                    <TextBlock Text="Development state previews" FontSize="17" FontWeight="SemiBold" />
+                    <TextBlock Text="Demonstrate results states without accessing a device. These controls affect only the mock results page." Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,7,0,16" TextWrapping="Wrap" />
+                    <WrapPanel>
+                        <Button Content="Completed" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Completed" />
+                        <Button Content="Empty" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Empty" />
+                        <Button Content="Loading" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Loading" />
+                        <Button Content="Canceled" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Canceled" />
+                        <Button Content="Failed" Margin="0,0,8,8" Command="{Binding DataContext.Results.SetDemoStateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="Failed" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

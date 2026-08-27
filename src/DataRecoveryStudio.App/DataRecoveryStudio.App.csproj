@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DataRecoveryStudio.Core\DataRecoveryStudio.Core.csproj" />
+    <ProjectReference Include="..\DataRecoveryStudio.Application\DataRecoveryStudio.Application.csproj" />
+    <ProjectReference Include="..\DataRecoveryStudio.Infrastructure\DataRecoveryStudio.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>DataRecoveryStudio</AssemblyName>
+    <RootNamespace>DataRecoveryStudio.App</RootNamespace>
+  </PropertyGroup>
+
+</Project>
