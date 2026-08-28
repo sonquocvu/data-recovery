@@ -45,7 +45,15 @@ public sealed class MockScanService(TimeSpan? stepDelay = null, int stepCount = 
                 (int)(expectedFiles * ratio)));
         }
 
-        return new ScanSession(sessionId, source.Id, mode, startedAt, ScanState.Completed);
+        return new ScanSession(
+            sessionId,
+            source.Id,
+            mode,
+            startedAt,
+            ScanState.Completed,
+            stopwatch.Elapsed,
+            mode == ScanModeKind.Standard ? 1_284 : 4_716,
+            source);
     }
 
     private static string GetPhase(ScanModeKind mode, double ratio)

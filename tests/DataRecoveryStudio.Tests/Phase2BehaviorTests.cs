@@ -18,7 +18,17 @@ public sealed class Phase2BehaviorTests
         service.SetLanguage("vi-VN");
 
         Assert.Equal("Thiết bị", text["Nav.Devices"]);
+        Assert.Equal("Chọn", text["Action.Select"]);
         Assert.Equal("Quét tiêu chuẩn", text["ScanMode.Standard"]);
+        Assert.Equal("Quét sâu", text["ScanMode.Deep"]);
+        Assert.Equal("Khuyên dùng", text["ScanMode.Recommended"]);
+        Assert.Equal("Bắt đầu quét", text["Action.StartScan"]);
+        Assert.Equal("Đã dùng", text["Common.Used"]);
+        Assert.Equal("Còn trống", text["Common.Free"]);
+        Assert.Equal("Tiếp tục quét", text["Action.KeepScanning"]);
+        Assert.Equal("Dừng quét an toàn", text["Action.CancelSafely"]);
+        Assert.Equal("Khoảng 3 phút", string.Format(text["Progress.AboutMinutes"], 3));
+        Assert.Equal("Đang hiển thị 3 trên 16 tệp", string.Format(text["Results.ShowingCount"], 3, 16));
         Assert.Equal("Khả năng khôi phục", text["Results.Column.Recoverability"]);
         Assert.True(changed > 0);
     }
@@ -73,6 +83,83 @@ public sealed class Phase2BehaviorTests
     }
 
     [Fact]
+    public void ResultsFilters_ReportCountsAndBulkSelectionOnlyAffectsVisibleFiles()
+    {
+        var localization = new DictionaryLocalizationService();
+        var source = new PhysicalDeviceId("mock:physical:results-selection");
+        var viewModel = new ResultsViewModel(new MockRecoveryCatalogService(), false, localization);
+        viewModel.LoadFiles(
+        [
+            CreateRecoverableFile("photo-a.jpg", FileCategory.Image, source),
+            CreateRecoverableFile("photo-b.jpg", FileCategory.Image, source),
+            CreateRecoverableFile("notes.docx", FileCategory.Document, source),
+        ]);
+
+        var all = viewModel.CategoryOptions.Single(option => option.Value == FileCategory.All);
+        Assert.True(all.IsSelected);
+        Assert.Contains("(3)", all.DisplayName, StringComparison.Ordinal);
+
+        viewModel.SelectedCategory = FileCategory.Image;
+
+        Assert.Equal(2, viewModel.VisibleCount);
+        Assert.True(viewModel.CategoryOptions.Single(option => option.Value == FileCategory.Image).IsSelected);
+        Assert.Contains(
+            "(2)",
+            viewModel.CategoryOptions.Single(option => option.Value == FileCategory.Image).DisplayName,
+            StringComparison.Ordinal);
+
+        viewModel.ToggleVisibleSelectionCommand.Execute(true);
+
+        Assert.True(viewModel.AreAllVisibleSelected);
+        Assert.Equal(2, viewModel.SelectedCount);
+        Assert.All(viewModel.VisibleResults, result => Assert.True(result.IsSelected));
+
+        viewModel.SelectedCategory = FileCategory.Document;
+
+        Assert.False(viewModel.AreAllVisibleSelected);
+        Assert.Single(viewModel.VisibleResults);
+        Assert.False(viewModel.VisibleResults[0].IsSelected);
+        Assert.Equal(2, viewModel.SelectedCount);
+
+        viewModel.ToggleVisibleSelectionCommand.Execute(true);
+        Assert.Equal(3, viewModel.SelectedCount);
+    }
+
+    [Fact]
+    public async Task ResultsSummaryAndVisibleCount_TrackCompletedScanContextAndFilters()
+    {
+        var localization = new DictionaryLocalizationService();
+        var source = (await new MockDeviceDiscoveryService().GetDevicesAsync(CancellationToken.None))[0];
+        var session = new ScanSession(
+            Guid.NewGuid(),
+            source.Id,
+            ScanModeKind.Standard,
+            DateTimeOffset.UtcNow,
+            ScanState.Completed,
+            TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(15),
+            16,
+            source);
+        var viewModel = new ResultsViewModel(new MockRecoveryCatalogService(), false, localization);
+
+        await viewModel.LoadAsync(session);
+
+        Assert.True(viewModel.HasScanSummary);
+        Assert.Contains(source.DisplayName, viewModel.ScanSummary, StringComparison.Ordinal);
+        Assert.Contains("C:", viewModel.ScanSummary, StringComparison.Ordinal);
+        Assert.Contains("NTFS", viewModel.ScanSummary, StringComparison.Ordinal);
+        Assert.Contains(localization["ScanMode.Standard"], viewModel.ScanSummary, StringComparison.Ordinal);
+        Assert.Contains(localization["Common.Completed"], viewModel.ScanSummary, StringComparison.Ordinal);
+        Assert.Contains("00:02:15", viewModel.ScanSummary, StringComparison.Ordinal);
+        Assert.Equal("Showing 16 of 16 files", viewModel.VisibleCountText);
+        Assert.False(viewModel.CanRecover);
+
+        viewModel.SelectedCategory = FileCategory.Image;
+        Assert.Equal("Showing 3 of 16 files", viewModel.VisibleCountText);
+        viewModel.SearchText = "mountain";
+        Assert.Equal("Showing 1 of 16 files", viewModel.VisibleCountText);
+    }
+
+    [Fact]
     public void DestinationError_ExplainsSamePhysicalDevice()
     {
         var localization = new DictionaryLocalizationService();
@@ -105,6 +192,82 @@ public sealed class Phase2BehaviorTests
         Assert.Equal(ScanState.Canceled, completed?.State);
     }
 
+    [Fact]
+    public async Task CancelConfirmationEnterEscapeAndCloseDismissals_KeepScanRunning()
+    {
+        var service = new ControlledScanService();
+        var source = (await new MockDeviceDiscoveryService().GetDevicesAsync(CancellationToken.None))[0];
+        var completions = 0;
+        var viewModel = new ScanProgressViewModel(service, _ => completions++, new DictionaryLocalizationService());
+        var running = viewModel.StartAsync(source, ScanModeKind.Standard);
+        await service.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await WaitUntilAsync(() => viewModel.Elapsed == TimeSpan.FromSeconds(2));
+
+        Assert.Contains("C:", viewModel.SourceContext, StringComparison.Ordinal);
+        Assert.Equal("00:00:02", viewModel.ElapsedText);
+        Assert.Equal("About 3 minutes", viewModel.RemainingText);
+
+        for (var dismissal = 0; dismissal < 3; dismissal++)
+        {
+            Assert.True(viewModel.TryBeginCancellationConfirmation());
+            viewModel.EndCancellationConfirmation(cancelConfirmed: false);
+            Assert.True(viewModel.CanCancel);
+            Assert.Equal(0, service.CancellationRequests);
+        }
+
+        service.Complete(source, ScanModeKind.Standard);
+        await running;
+        Assert.Equal(1, completions);
+        Assert.Equal(0, service.CancellationRequests);
+    }
+
+    [Fact]
+    public async Task CancelSafely_IssuesExactlyOneCancellationRequest()
+    {
+        var service = new ControlledScanService();
+        var source = (await new MockDeviceDiscoveryService().GetDevicesAsync(CancellationToken.None))[0];
+        ScanSession? completed = null;
+        var viewModel = new ScanProgressViewModel(service, session => completed = session, new DictionaryLocalizationService());
+        var running = viewModel.StartAsync(source, ScanModeKind.Deep);
+        await service.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.True(viewModel.TryBeginCancellationConfirmation());
+        Assert.False(viewModel.TryBeginCancellationConfirmation());
+        viewModel.EndCancellationConfirmation(cancelConfirmed: true);
+        viewModel.EndCancellationConfirmation(cancelConfirmed: true);
+        await running;
+
+        Assert.Equal(1, service.CancellationRequests);
+        Assert.Equal(ScanState.Canceled, completed?.State);
+    }
+
+    [Fact]
+    public async Task NaturalCompletionWhileConfirmationOpen_DefersAndDeliversOnceWithoutCanceling()
+    {
+        var service = new ControlledScanService();
+        var source = (await new MockDeviceDiscoveryService().GetDevicesAsync(CancellationToken.None))[0];
+        var completions = new List<ScanSession>();
+        var invalidations = 0;
+        var viewModel = new ScanProgressViewModel(service, completions.Add, new DictionaryLocalizationService());
+        viewModel.CancellationConfirmationInvalidated += (_, _) => invalidations++;
+        var running = viewModel.StartAsync(source, ScanModeKind.Standard);
+        await service.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.True(viewModel.TryBeginCancellationConfirmation());
+
+        service.Complete(source, ScanModeKind.Standard);
+        await running;
+
+        Assert.Equal(ScanState.Completed, viewModel.State);
+        Assert.Equal(1, invalidations);
+        Assert.Empty(completions);
+        viewModel.EndCancellationConfirmation(cancelConfirmed: true);
+        viewModel.EndCancellationConfirmation(cancelConfirmed: true);
+
+        Assert.Single(completions);
+        Assert.Equal(ScanState.Completed, completions[0].State);
+        Assert.Equal(0, service.CancellationRequests);
+    }
+
     private sealed class InMemorySettingsStore : ISettingsStore
     {
         public AppSettings Settings { get; private set; } = AppSettings.Default;
@@ -115,6 +278,36 @@ public sealed class Phase2BehaviorTests
             return Task.CompletedTask;
         }
     }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(1);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException("The expected view-model state was not reached.");
+            }
+
+            await Task.Delay(10);
+        }
+    }
+
+    private static RecoverableFile CreateRecoverableFile(
+        string name,
+        FileCategory category,
+        PhysicalDeviceId source) =>
+        new(
+            Guid.NewGuid(),
+            name,
+            @"Mock\Recovered\",
+            1_024,
+            DateTimeOffset.UtcNow,
+            category,
+            RecoverabilityStatus.Good,
+            source,
+            "Mock preview description.",
+            PreviewState.Supported);
 
     private sealed class DeferredCancellationScanService : IScanService
     {
@@ -130,5 +323,44 @@ public sealed class Phase2BehaviorTests
             cancellationToken.ThrowIfCancellationRequested();
             return new ScanSession(id, source.Id, mode, DateTimeOffset.UtcNow, ScanState.Completed);
         }
+    }
+
+    private sealed class ControlledScanService : IScanService
+    {
+        private readonly TaskCompletionSource<ScanSession> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int CancellationRequests;
+
+        public async Task<ScanSession> ScanAsync(
+            StorageDevice source,
+            ScanModeKind mode,
+            IProgress<ScanProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            progress.Report(new ScanProgress(Guid.NewGuid(), ScanState.Scanning, "Progress.Phase.Metadata", 1, 100, TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(3), 1));
+            Started.TrySetResult();
+            try
+            {
+                return await _completion.Task.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                Interlocked.Increment(ref CancellationRequests);
+                throw;
+            }
+        }
+
+        public void Complete(StorageDevice source, ScanModeKind mode) =>
+            _completion.TrySetResult(
+                new ScanSession(
+                    Guid.NewGuid(),
+                    source.Id,
+                    mode,
+                    DateTimeOffset.UtcNow,
+                    ScanState.Completed,
+                    TimeSpan.FromSeconds(2),
+                    1,
+                    source));
     }
 }

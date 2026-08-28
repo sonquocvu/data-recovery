@@ -7,7 +7,9 @@ public partial class CancelConfirmationWindow : Window
     public CancelConfirmationWindow(string title, string message, string affirmativeLabel, string negativeLabel)
     {
         InitializeComponent();
+        ThemeManager.Register(this);
         DataContext = new DialogText(title, message, affirmativeLabel, negativeLabel);
+        Loaded += (_, _) => SafeDefaultButton.Focus();
     }
 
     private void Confirm_Click(object sender, RoutedEventArgs e) => DialogResult = true;

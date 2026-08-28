@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
+        ThemeManager.Register(this);
         _viewModel = viewModel;
         DataContext = viewModel;
         viewModel.Settings.ThemeChanged += (_, theme) => ThemeManager.Apply(theme);

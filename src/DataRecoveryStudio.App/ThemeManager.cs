@@ -6,6 +6,11 @@ namespace DataRecoveryStudio.App;
 
 public static class ThemeManager
 {
+    private static ThemePreference _effectiveTheme = ThemePreference.Dark;
+
+    public static ThemePreference EffectiveTheme => _effectiveTheme;
+    public static event EventHandler<ThemePreference>? EffectiveThemeChanged;
+
     public static void Apply(ThemePreference preference)
     {
         var effective = preference == ThemePreference.FollowSystem ? GetSystemPreference() : preference;
@@ -18,6 +23,25 @@ public static class ThemeManager
         var replacement = new ResourceDictionary { Source = source };
         if (current is null) dictionaries.Insert(0, replacement);
         else dictionaries[dictionaries.IndexOf(current)] = replacement;
+
+        _effectiveTheme = effective;
+        foreach (Window window in System.Windows.Application.Current.Windows)
+        {
+            NativeWindowAppearance.TryApply(window, effective == ThemePreference.Dark);
+        }
+
+        EffectiveThemeChanged?.Invoke(null, effective);
+    }
+
+    public static void Register(Window window)
+    {
+        void ApplyCurrent(object? sender = null, EventArgs? args = null) =>
+            NativeWindowAppearance.TryApply(window, EffectiveTheme == ThemePreference.Dark);
+
+        EventHandler<ThemePreference> themeChanged = (_, _) => ApplyCurrent();
+        window.SourceInitialized += ApplyCurrent;
+        EffectiveThemeChanged += themeChanged;
+        window.Closed += (_, _) => EffectiveThemeChanged -= themeChanged;
     }
 
     private static ThemePreference GetSystemPreference()

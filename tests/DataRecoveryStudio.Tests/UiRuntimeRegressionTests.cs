@@ -1,5 +1,8 @@
 using System.Windows;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -33,6 +36,14 @@ public sealed class UiRuntimeRegressionTests
     public Task ProductionViewNavigationSoak_RemainsResponsiveFor120Seconds() =>
         WpfTestHost.Instance.RunAsync(VerifyNavigationSoakAsync, TimeSpan.FromSeconds(150));
 
+    [Fact]
+    public Task PolishedControls_RenderAndRespondAcrossThemesAndCompactLayouts() =>
+        WpfTestHost.Instance.RunAsync(VerifyPolishedControlsAsync);
+
+    [Fact]
+    public Task CancelDialog_NaturalCompletionClosesModalBeforeSingleResultsNavigation() =>
+        WpfTestHost.Instance.RunAsync(VerifyCancelDialogCompletionRaceAsync);
+
     private static async Task VerifyStandardAndResultsViewsAsync()
     {
         var scan = new HoldingScanService();
@@ -50,7 +61,20 @@ public sealed class UiRuntimeRegressionTests
             Assert.True(graph.Main.Results.IsEmpty);
             Assert.Single(FindVisualChildren<ResultsView>(window));
 
-            SelectConnectedDevice(graph.Main);
+            graph.Main.Navigate(PageKind.Devices);
+            await RenderAndPumpAsync(window);
+            var selectButton = FindVisualChildren<Button>(window)
+                .First(button =>
+                    button.DataContext is DeviceCardViewModel { IsAvailable: true } &&
+                    Equals(button.Content, graph.Localization["Action.Select"]));
+            selectButton.Focus();
+            var selectPeer = new ButtonAutomationPeer(selectButton);
+            Assert.IsAssignableFrom<IInvokeProvider>(selectPeer.GetPattern(PatternInterface.Invoke)).Invoke();
+            await PumpDispatcherAsync();
+            Assert.Equal(PageKind.ScanMode, graph.Main.CurrentPage);
+            Assert.True(graph.Main.ScanMode.IsStandardSelected);
+            Assert.Contains("C:", graph.Main.ScanMode.SourceContext, StringComparison.Ordinal);
+            Assert.Contains("NTFS", graph.Main.ScanMode.SourceContext, StringComparison.Ordinal);
             graph.Main.ScanMode.SelectModeCommand.Execute(ScanModeKind.Standard);
             await AssertRenderedAsync("Scan Mode with Standard selected", window, graph.Localization);
             Assert.True(graph.Main.ScanMode.IsStandardSelected);
@@ -64,12 +88,17 @@ public sealed class UiRuntimeRegressionTests
             await WaitUntilAsync(() => graph.Main.CurrentPage == PageKind.Results && graph.Main.Results.IsCompleted);
             await AssertRenderedAsync("Recovery Results with a completed session", window, graph.Localization);
             Assert.NotEmpty(graph.Main.Results.VisibleResults);
+            Assert.False(string.IsNullOrWhiteSpace(graph.Main.Results.ScanSummary));
+            var recoverButton = FindVisualChildren<Button>(window)
+                .Single(button => Equals(button.Content, graph.Localization["Action.Recover"]));
+            Assert.False(recoverButton.IsEnabled);
 
             var first = graph.Main.Results.VisibleResults[0];
             first.IsSelected = true;
             graph.Main.Results.SelectedItem = first;
             await AssertRenderedAsync("Recovery Results with selected files and preview", window, graph.Localization);
             Assert.True(graph.Main.Results.CanRecover);
+            Assert.True(recoverButton.IsEnabled);
 
             graph.Main.Results.SetDemoStateCommand.Execute(nameof(ResultsDisplayState.Loading));
             await AssertRenderedAsync("Loading Results state", window, graph.Localization);
@@ -305,6 +334,255 @@ public sealed class UiRuntimeRegressionTests
         diagnostics.AssertClean();
     }
 
+    private static async Task VerifyCancelDialogCompletionRaceAsync()
+    {
+        var scan = new DialogRaceScanService();
+        var graph = CreateGraph(scan);
+        await graph.Main.InitializeAsync();
+        SelectConnectedDevice(graph.Main);
+        graph.Main.ScanMode.StartScanCommand.Execute(null);
+        await scan.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        var resultsTransitions = 0;
+        graph.Main.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainViewModel.CurrentPage) && graph.Main.CurrentPage == PageKind.Results)
+            {
+                resultsTransitions++;
+            }
+        };
+        var window = CreateMainWindow(graph.Main);
+        using var diagnostics = new WpfScenarioDiagnostics("scan completion while cancel dialog is open");
+        try
+        {
+            window.Show();
+            await RenderAndPumpAsync(window);
+            var cancelButton = FindVisualChildren<Button>(window)
+                .Single(button => Equals(button.Content, graph.Localization["Action.Cancel"]));
+            var dialogObserved = false;
+            _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(
+                () =>
+                {
+                    var dialog = System.Windows.Application.Current.Windows.OfType<CancelConfirmationWindow>().Single();
+                    dialogObserved = true;
+                    var safeButton = FindVisualChildren<Button>(dialog)
+                        .Single(button => Equals(button.Content, graph.Localization["Action.KeepScanning"]));
+                    Assert.True(safeButton.IsDefault);
+                    Assert.True(safeButton.IsCancel);
+                    Assert.Equal(PageKind.ScanProgress, graph.Main.CurrentPage);
+                    Assert.False(graph.Main.Results.IsLoading);
+                    scan.Complete();
+                },
+                DispatcherPriority.ApplicationIdle);
+
+            cancelButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitUntilAsync(() => graph.Main.CurrentPage == PageKind.Results && graph.Main.Results.IsCompleted);
+            await RenderAndPumpAsync(window);
+
+            Assert.True(dialogObserved);
+            Assert.Equal(1, resultsTransitions);
+            Assert.Equal(0, scan.CancellationRequests);
+            Assert.Empty(System.Windows.Application.Current.Windows.OfType<CancelConfirmationWindow>());
+        }
+        finally
+        {
+            window.Close();
+            await PumpDispatcherAsync();
+        }
+
+        diagnostics.AssertClean();
+    }
+
+    private static async Task VerifyPolishedControlsAsync()
+    {
+        var graph = CreateGraph(new MockScanService(TimeSpan.FromMilliseconds(1), 4));
+        await graph.Main.InitializeAsync();
+        var source = graph.Main.Devices.Devices.First(device => device.IsAvailable).Device.Id;
+        await graph.Main.Results.LoadAsync(
+            new ScanSession(Guid.NewGuid(), source, ScanModeKind.Standard, DateTimeOffset.UtcNow, ScanState.Completed));
+        graph.Main.Navigate(PageKind.Results);
+        var window = CreateMainWindow(graph.Main);
+        window.MinWidth = 640;
+        window.MinHeight = 600;
+        window.Width = 1080;
+        window.Height = 680;
+        using var diagnostics = new WpfScenarioDiagnostics("polished controls and responsive layouts");
+        try
+        {
+            window.Show();
+            await RenderAndPumpAsync(window);
+            CaptureIfRequested(window, "results-dark-en-1080x680");
+
+            AssertSelectedNavigation(window, "MainNavigation", expectedIndex: 1);
+            var dataGrid = FindVisualChildren<DataGrid>(window).Single(grid => grid.Name == "ResultsDataGrid");
+            Assert.Equal(5, dataGrid.Columns.Count);
+            Assert.All(dataGrid.Columns, column => Assert.True(column.ActualWidth >= column.MinWidth));
+            Assert.All(
+                FindVisualChildren<DataGridColumnHeader>(dataGrid)
+                    .SelectMany(header => FindVisualChildren<TextBlock>(header))
+                    .Where(text => !string.IsNullOrWhiteSpace(text.Text)),
+                text =>
+                {
+                    Assert.True(text.ActualWidth > 0);
+                    Assert.True(text.ActualHeight >= text.FontSize);
+                });
+            Assert.DoesNotContain(
+                FindVisualChildren<ScrollBar>(dataGrid),
+                scrollBar => scrollBar.Orientation == Orientation.Horizontal && scrollBar.IsVisible);
+            AssertThemedBrush(dataGrid.Background, "SurfaceBrush");
+            dataGrid.SelectedItem = graph.Main.Results.VisibleResults[0];
+            await RenderAndPumpAsync(window);
+            var selectedRow = Assert.IsType<DataGridRow>(
+                dataGrid.ItemContainerGenerator.ContainerFromItem(dataGrid.SelectedItem));
+            AssertThemedBrush(selectedRow.Background, "SelectedBrush");
+            Assert.All(
+                FindVisualChildren<DataGridCell>(selectedRow),
+                cell => Assert.Equal(0, Assert.IsType<SolidColorBrush>(cell.Background).Color.A));
+            var resultsSortComboBox = FindVisualChildren<ComboBox>(window)
+                .Single(combo => combo.Name == "ResultsSortComboBox");
+            await AssertComboPopupAsync(resultsSortComboBox);
+
+            ThemeManager.Apply(ThemePreference.Light);
+            graph.Localization.SetLanguage("vi-VN");
+            await RenderAndPumpAsync(window);
+            CaptureIfRequested(window, "results-light-vi-1080x680");
+            AssertThemedBrush(dataGrid.Background, "SurfaceBrush");
+            selectedRow = Assert.IsType<DataGridRow>(
+                dataGrid.ItemContainerGenerator.ContainerFromItem(dataGrid.SelectedItem));
+            Assert.True(selectedRow.IsSelected);
+            AssertThemedBrush(selectedRow.Background, "SelectedBrush");
+            AssertThemedControls(window);
+            await AssertComboPopupAsync(resultsSortComboBox);
+            ThemeManager.Apply(ThemePreference.Dark);
+            graph.Localization.SetLanguage("en-US");
+
+            foreach (var (width, height) in new[] { (1080d, 680d), (1366d, 768d), (1920d, 1080d), (2048d, 1248d) })
+            {
+                window.Width = width;
+                window.Height = height;
+                await RenderAndPumpAsync(window);
+                Assert.True(dataGrid.ActualWidth >= 440);
+                Assert.All(dataGrid.Columns, column => Assert.True(column.ActualWidth >= column.MinWidth));
+            }
+
+            window.WindowState = WindowState.Maximized;
+            await RenderAndPumpAsync(window);
+            Assert.True(window.ActualWidth >= 1080);
+            window.WindowState = WindowState.Normal;
+
+            window.Width = 700;
+            window.Height = 680;
+            await RenderAndPumpAsync(window);
+            var preview = FindVisualChildren<FrameworkElement>(window).Single(element => element.Name == "PreviewPanel");
+            Assert.False(preview.IsVisible);
+            CaptureIfRequested(window, "results-dark-en-compact");
+
+            graph.Main.Navigate(PageKind.Settings);
+            window.Width = 1080;
+            await RenderAndPumpAsync(window);
+            AssertSelectedNavigation(window, "MainNavigation", expectedIndex: 2);
+            CaptureIfRequested(window, "settings-dark-en-wide");
+            var settingsCards = FindVisualChildren<UniformGrid>(window).Single(grid => grid.Name == "SettingsCards");
+            Assert.Equal(2, settingsCards.Columns);
+            foreach (var combo in FindVisualChildren<ComboBox>(window).Where(combo => combo.Name is "ThemeComboBox" or "LanguageComboBox"))
+            {
+                await AssertComboPopupAsync(combo);
+            }
+
+            ThemeManager.Apply(ThemePreference.Light);
+            graph.Localization.SetLanguage("vi-VN");
+            await RenderAndPumpAsync(window);
+            foreach (var combo in FindVisualChildren<ComboBox>(window).Where(combo => combo.Name is "ThemeComboBox" or "LanguageComboBox"))
+            {
+                await AssertComboPopupAsync(combo);
+            }
+
+            ThemeManager.Apply(ThemePreference.Dark);
+            graph.Localization.SetLanguage("en-US");
+            await RenderAndPumpAsync(window);
+
+            window.Width = 700;
+            await RenderAndPumpAsync(window);
+            Assert.Equal(1, settingsCards.Columns);
+            CaptureIfRequested(window, "settings-dark-en-compact");
+
+            graph.Main.Navigate(PageKind.Devices);
+            SelectConnectedDevice(graph.Main);
+            graph.Main.ScanMode.SelectModeCommand.Execute(ScanModeKind.Deep);
+            window.Width = 1080;
+            await RenderAndPumpAsync(window);
+            AssertSelectedNavigation(window, "MainNavigation", expectedIndex: 0);
+            AssertSelectedNavigation(window, "ScanModes", expectedIndex: 1);
+            CaptureIfRequested(window, "scan-mode-dark-en");
+
+            ThemeManager.Apply(ThemePreference.Light);
+            graph.Localization.SetLanguage("vi-VN");
+            await RenderAndPumpAsync(window);
+            AssertThemedControls(window);
+            CaptureIfRequested(window, "scan-mode-light-vi");
+            _ = NativeWindowAppearance.TryApply(window, useDarkTitleBar: false);
+
+            ThemeManager.Apply(ThemePreference.Dark);
+            graph.Localization.SetLanguage("en-US");
+            await RenderAndPumpAsync(window);
+            AssertThemedControls(window);
+            _ = NativeWindowAppearance.TryApply(window, useDarkTitleBar: true);
+        }
+        finally
+        {
+            ThemeManager.Apply(ThemePreference.Dark);
+            graph.Localization.SetLanguage("en-US");
+            window.Close();
+            await PumpDispatcherAsync();
+        }
+
+        diagnostics.AssertClean();
+    }
+
+    private static async Task AssertComboPopupAsync(ComboBox comboBox)
+    {
+        comboBox.ApplyTemplate();
+        comboBox.IsDropDownOpen = true;
+        await PumpDispatcherAsync();
+        var popup = Assert.IsType<Popup>(comboBox.Template.FindName("PART_Popup", comboBox));
+        Assert.True(popup.IsOpen);
+        var popupContent = Assert.IsAssignableFrom<FrameworkElement>(popup.Child);
+        popupContent.UpdateLayout();
+        Render(popupContent);
+        CaptureIfRequested(popupContent, $"popup-{comboBox.Name}-{ThemeManager.EffectiveTheme}");
+        comboBox.IsDropDownOpen = false;
+        await PumpDispatcherAsync();
+    }
+
+    private static void AssertSelectedNavigation(Window window, string groupName, int expectedIndex)
+    {
+        var options = FindVisualChildren<RadioButton>(window)
+            .Where(option => option.GroupName == groupName)
+            .ToArray();
+        Assert.NotEmpty(options);
+        Assert.Equal(expectedIndex, Array.FindIndex(options, option => option.IsChecked == true));
+        Assert.Single(options.Where(option => option.IsChecked == true));
+    }
+
+    private static void AssertThemedControls(Window window)
+    {
+        foreach (var control in FindVisualChildren<Control>(window)
+                     .Where(control => control is TextBox or ComboBox or DataGrid or ScrollBar))
+        {
+            Assert.NotNull(control.Background);
+        }
+
+        foreach (var scrollBar in FindVisualChildren<ScrollBar>(window))
+        {
+            AssertThemedBrush(scrollBar.Background, "ScrollBarTrackBrush");
+        }
+    }
+
+    private static void AssertThemedBrush(Brush actual, string resourceKey)
+    {
+        var expected = Assert.IsType<SolidColorBrush>(System.Windows.Application.Current.Resources[resourceKey]);
+        Assert.Equal(expected.Color, Assert.IsType<SolidColorBrush>(actual).Color);
+    }
+
     private static void ConfirmCancelThroughProductionDialog(MainWindow window, DictionaryLocalizationService localization)
     {
         var cancelButton = FindVisualChildren<Button>(window)
@@ -335,9 +613,11 @@ public sealed class UiRuntimeRegressionTests
         }
 
         await RenderAndPumpAsync(window);
+        CaptureIfRequested(window, $"{CaptureName(scenario)}-dark-en");
         ThemeManager.Apply(ThemePreference.Light);
         localization.SetLanguage("vi-VN");
         await RenderAndPumpAsync(window);
+        CaptureIfRequested(window, $"{CaptureName(scenario)}-light-vi");
         ThemeManager.Apply(ThemePreference.Dark);
         localization.SetLanguage("en-US");
         await RenderAndPumpAsync(window);
@@ -353,9 +633,11 @@ public sealed class UiRuntimeRegressionTests
         {
             window.Show();
             await RenderAndPumpAsync(window);
+            CaptureIfRequested(window, $"{CaptureName(scenario)}-dark-en");
             ThemeManager.Apply(ThemePreference.Light);
             localization.SetLanguage("vi-VN");
             await RenderAndPumpAsync(window);
+            CaptureIfRequested(window, $"{CaptureName(scenario)}-light-vi");
             ThemeManager.Apply(ThemePreference.Dark);
             localization.SetLanguage("en-US");
             await RenderAndPumpAsync(window);
@@ -391,7 +673,6 @@ public sealed class UiRuntimeRegressionTests
     {
         var card = main.Devices.Devices.First(device => device.IsAvailable);
         main.Devices.SelectDeviceCommand.Execute(card);
-        main.Devices.ContinueCommand.Execute(null);
         Assert.Equal(PageKind.ScanMode, main.CurrentPage);
     }
 
@@ -405,15 +686,38 @@ public sealed class UiRuntimeRegressionTests
         await PumpDispatcherAsync();
     }
 
-    private static void Render(Window window)
+    private static void Render(FrameworkElement element)
     {
-        var width = Math.Max(1, (int)Math.Ceiling(window.ActualWidth));
-        var height = Math.Max(1, (int)Math.Ceiling(window.ActualHeight));
+        var width = Math.Max(1, (int)Math.Ceiling(element.ActualWidth));
+        var height = Math.Max(1, (int)Math.Ceiling(element.ActualHeight));
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(window);
+        bitmap.Render(element);
         Assert.Equal(width, bitmap.PixelWidth);
         Assert.Equal(height, bitmap.PixelHeight);
     }
+
+    private static void CaptureIfRequested(FrameworkElement element, string name)
+    {
+        var directory = Environment.GetEnvironmentVariable("DATA_RECOVERY_STUDIO_CAPTURE_DIR");
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        var width = Math.Max(1, (int)Math.Ceiling(element.ActualWidth));
+        var height = Math.Max(1, (int)Math.Ceiling(element.ActualHeight));
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(element);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        Directory.CreateDirectory(directory);
+        using var stream = File.Create(Path.Combine(directory, $"{name}.png"));
+        encoder.Save(stream);
+    }
+
+    private static string CaptureName(string scenario) =>
+        string.Concat(scenario.Select(character => char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : '-'))
+            .Trim('-');
 
     private static async Task PumpDispatcherAsync()
     {
@@ -495,10 +799,55 @@ public sealed class UiRuntimeRegressionTests
             progress.Report(new ScanProgress(sessionId, ScanState.Scanning, "Progress.Phase.Records", source.CapacityBytes / 3, source.CapacityBytes, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), 42));
             await _release.Task;
             cancellationToken.ThrowIfCancellationRequested();
-            return new ScanSession(sessionId, source.Id, mode, startedAt, ScanState.Completed);
+            return new ScanSession(
+                sessionId,
+                source.Id,
+                mode,
+                startedAt,
+                ScanState.Completed,
+                TimeSpan.FromSeconds(6),
+                42,
+                source);
         }
 
         public void Release() => _release.TrySetResult();
+    }
+
+    private sealed class DialogRaceScanService : IScanService
+    {
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private StorageDevice? _source;
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int CancellationRequests;
+
+        public async Task<ScanSession> ScanAsync(
+            StorageDevice source,
+            ScanModeKind mode,
+            IProgress<ScanProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            _source = source;
+            using var registration = cancellationToken.Register(() => Interlocked.Increment(ref CancellationRequests));
+            progress.Report(new ScanProgress(Guid.NewGuid(), ScanState.Scanning, "Progress.Phase.Metadata", 1, source.CapacityBytes, TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(3), 1));
+            Started.TrySetResult();
+            await _completion.Task.WaitAsync(cancellationToken);
+            return new ScanSession(
+                Guid.NewGuid(),
+                source.Id,
+                mode,
+                DateTimeOffset.UtcNow,
+                ScanState.Completed,
+                TimeSpan.FromSeconds(2),
+                1,
+                source);
+        }
+
+        public void Complete()
+        {
+            Assert.NotNull(_source);
+            _completion.TrySetResult();
+        }
     }
 
     private sealed class WpfScenarioDiagnostics : IDisposable

@@ -14,8 +14,8 @@ public sealed class ScanModeViewModel : ObservableObject
         _goBack = goBack;
         _startScan = startScan;
         BackCommand = new RelayCommand(_goBack);
-        SelectModeCommand = new RelayCommand<ScanModeKind>(SelectMode, _ => Source is not null);
-        StartScanCommand = new RelayCommand(Start, () => Source is not null && SelectedMode is not null);
+        SelectModeCommand = new RelayCommand<ScanModeKind>(SelectMode, _ => Source?.ConnectionStatus == DeviceConnectionStatus.Online);
+        StartScanCommand = new RelayCommand(Start, () => Source?.ConnectionStatus == DeviceConnectionStatus.Online && SelectedMode is not null);
     }
 
     public StorageDevice? Source
@@ -25,15 +25,18 @@ public sealed class ScanModeViewModel : ObservableObject
         {
             if (SetProperty(ref _source, value))
             {
-                SelectedMode = null;
-                OnPropertyChanged(nameof(SourceName));
-                SelectModeCommand.NotifyCanExecuteChanged();
-                StartScanCommand.NotifyCanExecuteChanged();
+                OnPropertyChanged(nameof(SourceContext));
             }
+
+            SelectedMode = value?.ConnectionStatus == DeviceConnectionStatus.Online
+                ? ScanModeKind.Standard
+                : null;
+            SelectModeCommand.NotifyCanExecuteChanged();
+            StartScanCommand.NotifyCanExecuteChanged();
         }
     }
 
-    public string SourceName => Source?.DisplayName ?? string.Empty;
+    public string SourceContext => Source is null ? string.Empty : DeviceDisplayFormatter.FormatContext(Source);
     public RelayCommand BackCommand { get; }
     public RelayCommand<ScanModeKind> SelectModeCommand { get; }
     public RelayCommand StartScanCommand { get; }
@@ -83,6 +86,10 @@ public sealed class ScanProgressViewModel : ObservableObject
     private TimeSpan? _estimatedRemaining;
     private int _filesFound;
     private string? _errorMessage;
+    private bool _isCancellationConfirmationOpen;
+    private bool _cancelRequestIssued;
+    private bool _completionDelivered;
+    private ScanSession? _pendingCompletion;
 
     public ScanProgressViewModel(IScanService scanService, Action<ScanSession> completed, ILocalizationService? localization = null)
     {
@@ -91,16 +98,27 @@ public sealed class ScanProgressViewModel : ObservableObject
         _localization = localization;
         _phase = Localize("Progress.Phase.Preparing");
         CancelCommand = new RelayCommand(Cancel, () => State is ScanState.Starting or ScanState.Scanning);
+        if (_localization is not null)
+        {
+            _localization.LanguageChanged += (_, _) =>
+            {
+                OnPropertyChanged(nameof(ModeName));
+                OnPropertyChanged(nameof(RemainingText));
+            };
+        }
     }
 
+    public event EventHandler? CancellationConfirmationInvalidated;
+
     public RelayCommand CancelCommand { get; }
-    public string SourceName => _source?.DisplayName ?? string.Empty;
+    public string SourceContext => _source is null ? string.Empty : DeviceDisplayFormatter.FormatContext(_source);
     public string ModeName => _mode == ScanModeKind.Standard ? Localize("ScanMode.Standard") : Localize("ScanMode.Deep");
     public string AmountScanned => $"{ByteFormatter.Format(BytesScanned)} / {ByteFormatter.Format(TotalBytes)}";
     public string ElapsedText => FormatDuration(Elapsed);
-    public string RemainingText => EstimatedRemaining is null ? Localize("Progress.Calculating") : FormatDuration(EstimatedRemaining.Value);
+    public string RemainingText => EstimatedRemaining is null ? Localize("Progress.Calculating") : FormatRemaining(EstimatedRemaining.Value);
     public bool IsCanceling => State == ScanState.Canceling;
     public bool CanCancel => State is ScanState.Starting or ScanState.Scanning;
+    public bool IsCancellationConfirmationOpen => _isCancellationConfirmationOpen;
 
     public ScanState State
     {
@@ -131,7 +149,11 @@ public sealed class ScanProgressViewModel : ObservableObject
         _cancellation = new CancellationTokenSource();
         _source = source;
         _mode = mode;
-        OnPropertyChanged(nameof(SourceName));
+        _cancelRequestIssued = false;
+        _completionDelivered = false;
+        _pendingCompletion = null;
+        _isCancellationConfirmationOpen = false;
+        OnPropertyChanged(nameof(SourceContext));
         OnPropertyChanged(nameof(ModeName));
         ErrorMessage = null;
         State = ScanState.Starting;
@@ -141,20 +163,71 @@ public sealed class ScanProgressViewModel : ObservableObject
         {
             var session = await _scanService.ScanAsync(source, mode, progress, _cancellation.Token).ConfigureAwait(true);
             State = session.State;
-            _completed(session);
+            CompleteOrDefer(session);
         }
         catch (OperationCanceledException)
         {
             State = ScanState.Canceled;
-            var canceled = new ScanSession(Guid.NewGuid(), source.Id, mode, DateTimeOffset.UtcNow, ScanState.Canceled);
-            _completed(canceled);
+            var canceled = new ScanSession(
+                Guid.NewGuid(),
+                source.Id,
+                mode,
+                DateTimeOffset.UtcNow,
+                ScanState.Canceled,
+                Elapsed,
+                FilesFound,
+                source);
+            CompleteOrDefer(canceled);
         }
         catch (Exception exception)
         {
             State = ScanState.Failed;
             ErrorMessage = exception.Message;
-            var failed = new ScanSession(Guid.NewGuid(), source.Id, mode, DateTimeOffset.UtcNow, ScanState.Failed);
-            _completed(failed);
+            var failed = new ScanSession(
+                Guid.NewGuid(),
+                source.Id,
+                mode,
+                DateTimeOffset.UtcNow,
+                ScanState.Failed,
+                Elapsed,
+                FilesFound,
+                source);
+            CompleteOrDefer(failed);
+        }
+    }
+
+    public bool TryBeginCancellationConfirmation()
+    {
+        if (_isCancellationConfirmationOpen || !CanCancel)
+        {
+            return false;
+        }
+
+        _isCancellationConfirmationOpen = true;
+        OnPropertyChanged(nameof(IsCancellationConfirmationOpen));
+        return true;
+    }
+
+    public void EndCancellationConfirmation(bool cancelConfirmed)
+    {
+        if (!_isCancellationConfirmationOpen)
+        {
+            return;
+        }
+
+        _isCancellationConfirmationOpen = false;
+        OnPropertyChanged(nameof(IsCancellationConfirmationOpen));
+
+        if (_pendingCompletion is ScanSession completion)
+        {
+            _pendingCompletion = null;
+            DeliverCompletion(completion);
+            return;
+        }
+
+        if (cancelConfirmed)
+        {
+            Cancel();
         }
     }
 
@@ -172,14 +245,57 @@ public sealed class ScanProgressViewModel : ObservableObject
 
     private void Cancel()
     {
+        if (_cancelRequestIssued || !CanCancel)
+        {
+            return;
+        }
+
+        _cancelRequestIssued = true;
         State = ScanState.Canceling;
         Phase = Localize("Progress.Phase.Canceling");
         _cancellation?.Cancel();
     }
 
-    private static string FormatDuration(TimeSpan duration) => duration.TotalHours >= 1
-        ? duration.ToString(@"h\:mm\:ss")
-        : duration.ToString(@"m\:ss");
+    private void CompleteOrDefer(ScanSession session)
+    {
+        if (_isCancellationConfirmationOpen)
+        {
+            _pendingCompletion = session;
+            CancellationConfirmationInvalidated?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        DeliverCompletion(session);
+    }
+
+    private void DeliverCompletion(ScanSession session)
+    {
+        if (_completionDelivered)
+        {
+            return;
+        }
+
+        _completionDelivered = true;
+        _completed(session);
+    }
+
+    private static string FormatDuration(TimeSpan duration) =>
+        $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}";
+
+    private string FormatRemaining(TimeSpan duration)
+    {
+        if (duration.TotalSeconds < 60)
+        {
+            return Localize("Progress.LessThanMinute");
+        }
+
+        var minutes = (int)Math.Ceiling(duration.TotalMinutes);
+        return minutes switch
+        {
+            1 => Localize("Progress.AboutOneMinute"),
+            _ => string.Format(Localize("Progress.AboutMinutes"), minutes),
+        };
+    }
 
     private string Localize(string key) => _localization?[key] ?? key;
 }

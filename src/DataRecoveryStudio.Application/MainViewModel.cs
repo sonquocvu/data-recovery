@@ -76,7 +76,15 @@ public sealed class MainViewModel : ObservableObject
         await Devices.LoadAsync().ConfigureAwait(true);
     }
 
-    public void Navigate(PageKind page) => CurrentPage = page;
+    public void Navigate(PageKind page)
+    {
+        if (page == PageKind.Devices)
+        {
+            Devices.PrepareForDisplay();
+        }
+
+        CurrentPage = page;
+    }
 
     private void SelectDevice(StorageDevice source)
     {

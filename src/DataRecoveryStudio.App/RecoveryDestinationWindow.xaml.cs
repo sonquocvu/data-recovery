@@ -13,6 +13,7 @@ public partial class RecoveryDestinationWindow : Window
     public RecoveryDestinationWindow(DestinationViewModel viewModel)
     {
         InitializeComponent();
+        ThemeManager.Register(this);
         _viewModel = viewModel;
         DataContext = viewModel;
     }

@@ -15,6 +15,11 @@ public partial class ScanProgressView : UserControl
             return;
         }
 
+        if (!scan.TryBeginCancellationConfirmation())
+        {
+            return;
+        }
+
         var dialog = new CancelConfirmationWindow(
             main.Localization["Progress.CancelTitle"],
             main.Localization["Progress.CancelBody"],
@@ -23,9 +28,25 @@ public partial class ScanProgressView : UserControl
         {
             Owner = Window.GetWindow(this),
         };
-        if (dialog.ShowDialog() == true && scan.CancelCommand.CanExecute(null))
+
+        void CloseObsoleteDialog(object? _, EventArgs __)
         {
-            scan.CancelCommand.Execute(null);
+            if (dialog.IsVisible)
+            {
+                dialog.Close();
+            }
+        }
+
+        scan.CancellationConfirmationInvalidated += CloseObsoleteDialog;
+        var cancelConfirmed = false;
+        try
+        {
+            cancelConfirmed = dialog.ShowDialog() == true;
+        }
+        finally
+        {
+            scan.CancellationConfirmationInvalidated -= CloseObsoleteDialog;
+            scan.EndCancellationConfirmation(cancelConfirmed);
         }
     }
 }

@@ -1,19 +1,19 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F4F7FB" />
     <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#F8FAFD" />
+    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#EEF3F9" />
     <SolidColorBrush x:Key="StatusBarBackgroundBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#F8FAFD" />
     <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#EEF3FA" />
     <SolidColorBrush x:Key="InputBackgroundBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="WindowBorderBrush" Color="#CBD5E1" />
-    <SolidColorBrush x:Key="BorderBrush" Color="#D9E1EC" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#CDD7E5" />
     <SolidColorBrush x:Key="DividerBrush" Color="#E5EAF1" />
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#172033" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#52627A" />
     <SolidColorBrush x:Key="TextTertiaryBrush" Color="#75849A" />
-    <SolidColorBrush x:Key="TextDisabledBrush" Color="#A0AABA" />
+    <SolidColorBrush x:Key="TextDisabledBrush" Color="#6F7E92" />
     <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="AccentBrush" Color="#336DF4" />
     <SolidColorBrush x:Key="AccentHoverBrush" Color="#245FD9" />
@@ -36,4 +36,9 @@
     <SolidColorBrush x:Key="RecoverabilityPoorBrush" Color="#C53048" />
     <SolidColorBrush x:Key="RecoverabilityUnknownBrush" Color="#52627A" />
     <SolidColorBrush x:Key="OverlayBrush" Color="#DDF4F7FB" />
+    <SolidColorBrush x:Key="DisabledBackgroundBrush" Color="#EDF1F6" />
+    <SolidColorBrush x:Key="ScrollBarTrackBrush" Color="#EEF2F7" />
+    <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#A6B2C2" />
+    <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#7D8CA1" />
+    <SolidColorBrush x:Key="PopupShadowBrush" Color="#33000000" />
 </ResourceDictionary>

@@ -5,8 +5,6 @@ namespace DataRecoveryStudio.Application;
 
 public sealed class DeviceCardViewModel : ObservableObject
 {
-    private bool _isSelected;
-
     public DeviceCardViewModel(StorageDevice device, ILocalizationService? localization = null)
     {
         Device = device;
@@ -52,12 +50,6 @@ public sealed class DeviceCardViewModel : ObservableObject
     public bool IsRemovable => Device.Type == StorageDeviceType.RemovableUsb;
 
     private string Localize(string key) => _localization?[key] ?? key;
-
-    public bool IsSelected
-    {
-        get => _isSelected;
-        set => SetProperty(ref _isSelected, value);
-    }
 }
 
 public sealed class DeviceSelectionViewModel : ObservableObject
@@ -66,22 +58,20 @@ public sealed class DeviceSelectionViewModel : ObservableObject
     private readonly Action<StorageDevice> _selectDevice;
     private readonly ILocalizationService? _localization;
     private bool _isLoading;
+    private bool _isNavigating;
     private string? _errorMessage;
-    private DeviceCardViewModel? _selectedDevice;
 
     public DeviceSelectionViewModel(IDeviceDiscoveryService devices, Action<StorageDevice> selectDevice, ILocalizationService? localization = null)
     {
         _devices = devices;
         _selectDevice = selectDevice;
         _localization = localization;
-        SelectDeviceCommand = new RelayCommand<DeviceCardViewModel>(SelectDevice, card => card.IsAvailable);
-        ContinueCommand = new RelayCommand(Continue, () => SelectedDevice is not null);
+        SelectDeviceCommand = new RelayCommand<DeviceCardViewModel>(SelectDevice, CanSelectDevice);
         RefreshCommand = new AsyncRelayCommand(LoadAsync);
     }
 
     public ObservableCollection<DeviceCardViewModel> Devices { get; } = [];
     public RelayCommand<DeviceCardViewModel> SelectDeviceCommand { get; }
-    public RelayCommand ContinueCommand { get; }
     public AsyncRelayCommand RefreshCommand { get; }
 
     public bool IsLoading
@@ -96,20 +86,18 @@ public sealed class DeviceSelectionViewModel : ObservableObject
         private set => SetProperty(ref _errorMessage, value);
     }
 
-    public DeviceCardViewModel? SelectedDevice
+    public bool IsNavigating
     {
-        get => _selectedDevice;
+        get => _isNavigating;
         private set
         {
-            if (SetProperty(ref _selectedDevice, value))
+            if (SetProperty(ref _isNavigating, value))
             {
-                ContinueCommand.NotifyCanExecuteChanged();
-                OnPropertyChanged(nameof(HasSelection));
+                SelectDeviceCommand.NotifyCanExecuteChanged();
             }
         }
     }
 
-    public bool HasSelection => SelectedDevice is not null;
     public bool HasDevices => Devices.Count > 0;
     public bool IsEmpty => !IsLoading && Devices.Count == 0;
 
@@ -142,19 +130,16 @@ public sealed class DeviceSelectionViewModel : ObservableObject
 
     private void SelectDevice(DeviceCardViewModel card)
     {
-        foreach (var device in Devices)
+        if (!CanSelectDevice(card))
         {
-            device.IsSelected = ReferenceEquals(device, card);
+            return;
         }
 
-        SelectedDevice = card;
+        IsNavigating = true;
+        _selectDevice(card.Device);
     }
 
-    private void Continue()
-    {
-        if (SelectedDevice is not null)
-        {
-            _selectDevice(SelectedDevice.Device);
-        }
-    }
+    private bool CanSelectDevice(DeviceCardViewModel card) => card.IsAvailable && !IsNavigating;
+
+    public void PrepareForDisplay() => IsNavigating = false;
 }

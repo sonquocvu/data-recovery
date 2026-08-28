@@ -15,6 +15,9 @@ public sealed class MockScanServiceTests
         var session = await service.ScanAsync(source, ScanModeKind.Standard, progress, CancellationToken.None);
 
         Assert.Equal(ScanState.Completed, session.State);
+        Assert.Equal(source, session.Source);
+        Assert.NotNull(session.Duration);
+        Assert.Equal(1_284, session.FilesFound);
         Assert.Equal(ScanState.Starting, progress.Values.First().State);
         Assert.Contains(progress.Values, item => item.State == ScanState.Scanning);
         Assert.Equal(ScanState.Completed, progress.Values.Last().State);

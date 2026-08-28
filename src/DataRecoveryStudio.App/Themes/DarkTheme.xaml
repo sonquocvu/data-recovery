@@ -13,7 +13,7 @@
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#F1F6FC" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#9FB0C4" />
     <SolidColorBrush x:Key="TextTertiaryBrush" Color="#718399" />
-    <SolidColorBrush x:Key="TextDisabledBrush" Color="#536377" />
+    <SolidColorBrush x:Key="TextDisabledBrush" Color="#8292A6" />
     <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="AccentBrush" Color="#477BFF" />
     <SolidColorBrush x:Key="AccentHoverBrush" Color="#5B8BFF" />
@@ -36,4 +36,9 @@
     <SolidColorBrush x:Key="RecoverabilityPoorBrush" Color="#FF7587" />
     <SolidColorBrush x:Key="RecoverabilityUnknownBrush" Color="#9FB0C4" />
     <SolidColorBrush x:Key="OverlayBrush" Color="#CC0C111B" />
+    <SolidColorBrush x:Key="DisabledBackgroundBrush" Color="#182230" />
+    <SolidColorBrush x:Key="ScrollBarTrackBrush" Color="#0B131E" />
+    <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#43566D" />
+    <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#647B96" />
+    <SolidColorBrush x:Key="PopupShadowBrush" Color="#99000000" />
 </ResourceDictionary>

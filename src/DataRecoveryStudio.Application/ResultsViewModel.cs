@@ -21,7 +21,7 @@ public enum ResultSort
     Recoverability,
 }
 
-public sealed record ChoiceOption<T>(T Value, string DisplayName);
+public sealed record ChoiceOption<T>(T Value, string DisplayName, bool IsSelected = false);
 
 public sealed class ResultItemViewModel : ObservableObject
 {
@@ -98,6 +98,8 @@ public sealed class ResultsViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(CategoryOptions));
                 OnPropertyChanged(nameof(SortChoices));
+                OnPropertyChanged(nameof(VisibleCountText));
+                OnPropertyChanged(nameof(ScanSummary));
                 foreach (var item in _allResults)
                 {
                     item.RefreshLocalizedText();
@@ -105,29 +107,38 @@ public sealed class ResultsViewModel : ObservableObject
             };
         }
         SelectCategoryCommand = new RelayCommand<FileCategory>(category => SelectedCategory = category);
+        ToggleVisibleSelectionCommand = new RelayCommand<bool>(ToggleVisibleSelection);
         SetDemoStateCommand = new RelayCommand<string>(SetDemoState);
         GenerateLargeDatasetCommand = new RelayCommand(GenerateLargeMockDataset, () => IsDevelopmentMode);
     }
 
     public BulkObservableCollection<ResultItemViewModel> VisibleResults { get; } = [];
     public IReadOnlyList<ChoiceOption<FileCategory>> CategoryOptions => Enum.GetValues<FileCategory>()
-        .Select(value => new ChoiceOption<FileCategory>(value, Localize($"Category.{value}", value.ToString())))
+        .Select(value => new ChoiceOption<FileCategory>(
+            value,
+            $"{Localize($"Category.{value}", value.ToString())} ({CountForCategory(value):N0})",
+            value == SelectedCategory))
         .ToArray();
     public IReadOnlyList<ChoiceOption<ResultSort>> SortChoices => Enum.GetValues<ResultSort>()
         .Select(value => new ChoiceOption<ResultSort>(value, Localize($"Sort.{value}", value.ToString())))
         .ToArray();
     public RelayCommand<FileCategory> SelectCategoryCommand { get; }
+    public RelayCommand<bool> ToggleVisibleSelectionCommand { get; }
     public RelayCommand<string> SetDemoStateCommand { get; }
     public RelayCommand GenerateLargeDatasetCommand { get; }
     public bool IsDevelopmentMode => _isDevelopmentMode;
     public ScanSession? Session => _session;
     public int TotalCount => _allResults.Count;
     public int VisibleCount => VisibleResults.Count;
+    public string VisibleCountText => string.Format(Localize("Results.ShowingCount", "Showing {0:N0} of {1:N0} files"), VisibleCount, TotalCount);
     public int SelectedCount => _allResults.Count(item => item.IsSelected);
     public long SelectedBytes => _allResults.Where(item => item.IsSelected).Sum(item => item.File.SizeBytes);
     public string SelectedSize => ByteFormatter.Format(SelectedBytes);
     public bool CanRecover => SelectedCount > 0 && Session is not null;
+    public bool AreAllVisibleSelected => VisibleResults.Count > 0 && VisibleResults.All(item => item.IsSelected);
     public IReadOnlyList<RecoverableFile> SelectedFiles => _allResults.Where(item => item.IsSelected).Select(item => item.File).ToArray();
+    public bool HasScanSummary => Session?.State == ScanState.Completed;
+    public string ScanSummary => BuildScanSummary();
     public double LastFilterDurationMilliseconds
     {
         get => _lastFilterDurationMilliseconds;
@@ -153,6 +164,7 @@ public sealed class ResultsViewModel : ObservableObject
         {
             if (SetProperty(ref _selectedCategory, value))
             {
+                OnPropertyChanged(nameof(CategoryOptions));
                 ApplyFilterAndSort();
             }
         }
@@ -210,6 +222,8 @@ public sealed class ResultsViewModel : ObservableObject
     {
         _session = session;
         OnPropertyChanged(nameof(Session));
+        OnPropertyChanged(nameof(HasScanSummary));
+        OnPropertyChanged(nameof(ScanSummary));
         if (session.State == ScanState.Canceled)
         {
             _allResults.Clear();
@@ -249,6 +263,7 @@ public sealed class ResultsViewModel : ObservableObject
         }
 
         State = _allResults.Count == 0 ? ResultsDisplayState.Empty : ResultsDisplayState.Completed;
+        OnPropertyChanged(nameof(CategoryOptions));
         ApplyFilterAndSort();
     }
 
@@ -264,6 +279,8 @@ public sealed class ResultsViewModel : ObservableObject
         var source = new PhysicalDeviceId("mock:physical:development:large-catalog");
         _session = new ScanSession(Guid.NewGuid(), source, ScanModeKind.Deep, DateTimeOffset.UtcNow, ScanState.Completed);
         OnPropertyChanged(nameof(Session));
+        OnPropertyChanged(nameof(HasScanSummary));
+        OnPropertyChanged(nameof(ScanSummary));
         var categories = new[] { FileCategory.Image, FileCategory.Document, FileCategory.Video, FileCategory.Audio, FileCategory.Archive, FileCategory.Unknown };
         var statuses = Enum.GetValues<RecoverabilityStatus>();
         var previews = Enum.GetValues<PreviewState>();
@@ -334,12 +351,66 @@ public sealed class ResultsViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(TotalCount));
         OnPropertyChanged(nameof(VisibleCount));
+        OnPropertyChanged(nameof(VisibleCountText));
         OnPropertyChanged(nameof(SelectedCount));
         OnPropertyChanged(nameof(SelectedBytes));
         OnPropertyChanged(nameof(SelectedSize));
         OnPropertyChanged(nameof(SelectedFiles));
         OnPropertyChanged(nameof(CanRecover));
+        OnPropertyChanged(nameof(AreAllVisibleSelected));
+        OnPropertyChanged(nameof(ScanSummary));
+    }
+
+    private int CountForCategory(FileCategory category) => category == FileCategory.All
+        ? _allResults.Count
+        : _allResults.Count(item => item.File.Category == category);
+
+    private void ToggleVisibleSelection(bool isSelected)
+    {
+        foreach (var item in VisibleResults)
+        {
+            item.IsSelected = isSelected;
+        }
+
+        NotifyCounts();
     }
 
     private string Localize(string key, string fallback) => _localization?[key] ?? fallback;
+
+    private string BuildScanSummary()
+    {
+        if (Session is not { State: ScanState.Completed } session)
+        {
+            return string.Empty;
+        }
+
+        var mode = Localize($"ScanMode.{session.Mode}", session.Mode.ToString());
+        var status = Localize("Common.Completed", "Completed");
+        var duration = session.Duration is TimeSpan elapsed
+            ? FormatDuration(elapsed)
+            : Localize("Results.DurationUnavailable", "Duration unavailable");
+        if (session.Source is StorageDevice source && source.Volumes.FirstOrDefault() is Volume volume)
+        {
+            return string.Format(
+                Localize("Results.ScanSummary", "{0} ({1}) · {2} · {3} · {4} · {5:N0} files · {6}"),
+                source.DisplayName,
+                DeviceDisplayFormatter.FormatMountPath(volume.MountPath),
+                volume.FileSystem,
+                mode,
+                status,
+                TotalCount,
+                duration);
+        }
+
+        return string.Format(
+            Localize("Results.ScanSummaryFallback", "{0} · {1} · {2} · {3:N0} files · {4}"),
+            session.SourceDeviceId,
+            mode,
+            status,
+            TotalCount,
+            duration);
+    }
+
+    private static string FormatDuration(TimeSpan duration) =>
+        $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}";
 }

@@ -80,7 +80,10 @@ public sealed record ScanSession(
     PhysicalDeviceId SourceDeviceId,
     ScanModeKind Mode,
     DateTimeOffset StartedAt,
-    ScanState State);
+    ScanState State,
+    TimeSpan? Duration = null,
+    int FilesFound = 0,
+    StorageDevice? Source = null);
 
 public sealed record ScanProgress(
     Guid SessionId,
