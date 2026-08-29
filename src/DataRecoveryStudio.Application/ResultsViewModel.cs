@@ -267,6 +267,19 @@ public sealed class ResultsViewModel : ObservableObject
         ApplyFilterAndSort();
     }
 
+    public void Reset()
+    {
+        _session = null;
+        _allResults.Clear();
+        VisibleResults.ReplaceAll([]);
+        SelectedItem = null;
+        State = ResultsDisplayState.Empty;
+        OnPropertyChanged(nameof(Session));
+        OnPropertyChanged(nameof(HasScanSummary));
+        OnPropertyChanged(nameof(ScanSummary));
+        NotifyCounts();
+    }
+
     public void ShowCompletedDemo() => State = _allResults.Count == 0 ? ResultsDisplayState.Empty : ResultsDisplayState.Completed;
 
     public void GenerateLargeMockDataset()

@@ -27,12 +27,15 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        var isDevelopmentMode = Debugger.IsAttached || string.Equals(
+        var isDevelopmentMode = string.Equals(
             Environment.GetEnvironmentVariable("DATA_RECOVERY_STUDIO_DEVELOPMENT"),
             "1",
             StringComparison.Ordinal);
+        IDeviceDiscoveryService discovery = isDevelopmentMode
+            ? new MockDeviceDiscoveryService()
+            : new WindowsStorageDiscoveryService(logger: _logger);
         _viewModel = new MainViewModel(
-            new MockDeviceDiscoveryService(),
+            discovery,
             new MockScanService(),
             new MockRecoveryCatalogService(),
             new JsonSettingsStore(logger: _logger),
@@ -46,8 +49,8 @@ public partial class App : System.Windows.Application
             "ApplicationStarting",
             CreateRuntimeProperties(new Dictionary<string, object?>
             {
-                ["phase"] = 2,
-                ["dataMode"] = "mock",
+                ["phase"] = 3,
+                ["dataMode"] = isDevelopmentMode ? "explicit-development-mock" : "windows-metadata",
                 ["developmentMode"] = isDevelopmentMode,
             }));
         await _viewModel.InitializeAsync();
@@ -58,12 +61,13 @@ public partial class App : System.Windows.Application
             "ApplicationInitialized",
             CreateRuntimeProperties(new Dictionary<string, object?>
             {
-                ["mockDeviceCount"] = _viewModel.Devices.Devices.Count,
+                ["deviceCount"] = _viewModel.Devices.Devices.Count,
             }));
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _viewModel?.Dispose();
         WriteLogSynchronously(
             "Information",
             "ApplicationExited",

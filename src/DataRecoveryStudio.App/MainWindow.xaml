@@ -18,7 +18,7 @@
                     <TextBlock Text="{Binding Localization[App.Title]}" Margin="10,0,0,0" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" />
                 </StackPanel>
                 <Border Grid.Column="1" Background="{DynamicResource AccentSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="10,5" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Localization[App.MockBadge]}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource AccentTextBrush}" />
+                    <TextBlock Text="{Binding Localization[App.PhaseBadge]}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource AccentTextBrush}" />
                 </Border>
             </Grid>
         </Border>
@@ -40,7 +40,7 @@
                             <StackPanel Orientation="Horizontal"><Path Data="{StaticResource IconSettings}" Style="{StaticResource IconPathStyle}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /><TextBlock Text="{Binding Localization[Nav.Settings]}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="11,0,0,0" VerticalAlignment="Center" /></StackPanel>
                         </RadioButton>
                     </StackPanel>
-                    <TextBlock Grid.Row="2" Text="{Binding Localization[App.Version]}" Margin="12,0,0,0" FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" VerticalAlignment="Bottom" />
+                    <TextBlock Grid.Row="2" Text="{Binding Localization[App.VersionPhase3]}" Margin="12,0,0,0" FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" VerticalAlignment="Bottom" />
                 </Grid>
             </Border>
             <ContentControl Grid.Column="1" Content="{Binding CurrentPageViewModel}" KeyboardNavigation.TabNavigation="Continue" />

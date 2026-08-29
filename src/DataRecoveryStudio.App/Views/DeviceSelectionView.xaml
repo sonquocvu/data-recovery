@@ -1,32 +1,60 @@
 <UserControl x:Class="DataRecoveryStudio.App.Views.DeviceSelectionView"
-             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:application="clr-namespace:DataRecoveryStudio.Application;assembly=DataRecoveryStudio.Application">
     <Grid Margin="{StaticResource PageMargin}" MaxWidth="1180" HorizontalAlignment="Center">
-        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <Grid>
             <StackPanel>
                 <TextBlock Text="{Binding DataContext.Localization[Device.Title], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageTitleStyle}" />
-                <TextBlock Text="{Binding DataContext.Localization[Device.Subtitle], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,8,0,0" MaxWidth="720" HorizontalAlignment="Left" />
+                <TextBlock Text="{Binding DataContext.Localization[Device.Phase3Subtitle], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,8,0,0" MaxWidth="720" HorizontalAlignment="Left" />
             </StackPanel>
             <Button Command="{Binding RefreshCommand}" HorizontalAlignment="Right" VerticalAlignment="Top" AutomationProperties.Name="{Binding DataContext.Localization[Action.Refresh], RelativeSource={RelativeSource AncestorType=Window}}">
                 <StackPanel Orientation="Horizontal"><Path Data="{StaticResource IconRefresh}" Style="{StaticResource IconPathStyle}" Width="16" Height="16" /><TextBlock Text="{Binding DataContext.Localization[Action.Refresh], RelativeSource={RelativeSource AncestorType=Window}}" Margin="8,0,0,0" /></StackPanel>
             </Button>
         </Grid>
-        <Border Grid.Row="1" Margin="0,20,0,18" Background="{DynamicResource InformationSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="14,11">
+
+        <Border Grid.Row="1" Margin="0,20,0,12" Background="{DynamicResource InformationSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="14,11">
             <StackPanel Orientation="Horizontal">
                 <Path Data="{StaticResource IconInfo}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource InformationBrush}" Width="18" Height="18" />
-                <TextBlock Text="{Binding DataContext.Localization[Device.SafePreview], RelativeSource={RelativeSource AncestorType=Window}}" Margin="10,0,0,0" Foreground="{DynamicResource InformationBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding DataContext.Localization[Device.Phase3Context], RelativeSource={RelativeSource AncestorType=Window}}" Margin="10,0,0,0" Foreground="{DynamicResource InformationBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
             </StackPanel>
         </Border>
 
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Grid.Row="2" Margin="0,0,0,12">
+            <Border Background="{DynamicResource InformationSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="12,9" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding DataContext.Localization[Device.Refreshing], RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{DynamicResource InformationBrush}" />
+            </Border>
+            <Border Background="{DynamicResource CriticalSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="12,9" Visibility="{Binding HasError, Converter={StaticResource BoolToVisibilityConverter}}">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right" Command="{Binding RefreshCommand}" Content="{Binding DataContext.Localization[Action.Refresh], RelativeSource={RelativeSource AncestorType=Window}}" Margin="12,0,0,0" />
+                    <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource CriticalBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </DockPanel>
+            </Border>
+            <Border Background="{DynamicResource WarningSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="12,9" Visibility="{Binding HasNotice, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding NoticeMessage}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" />
+            </Border>
+            <Border Background="{DynamicResource WarningSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="12,9" Visibility="{Binding HasNoMountedVolumes, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding DataContext.Localization[Device.NoMountedVolumes], RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" />
+            </Border>
+            <Border Background="{DynamicResource WarningSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="12,9" Visibility="{Binding HasNoSupportedDevices, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding DataContext.Localization[Device.NoSupportedVolumes], RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" />
+            </Border>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <ItemsControl ItemsSource="{Binding Devices}">
                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type application:DeviceCardViewModel}">
-                        <Border Style="{StaticResource SelectableCardStyle}" Width="342" Margin="0,0,14,14" Padding="18" MinHeight="226">
+                        <Border Style="{StaticResource SelectableCardStyle}" Width="342" Margin="0,0,14,14" Padding="18" MinHeight="250">
                             <Grid>
-                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="46" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                     <Border Width="40" Height="40" CornerRadius="{StaticResource RadiusMedium}" Background="{DynamicResource AccentSubtleBrush}" VerticalAlignment="Top">
@@ -34,6 +62,7 @@
                                             <Path Data="{StaticResource IconDrive}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource AccentTextBrush}" Visibility="{Binding IsInternal, Converter={StaticResource BoolToVisibilityConverter}}" />
                                             <Path Data="{StaticResource IconDrive}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource AccentTextBrush}" Visibility="{Binding IsExternal, Converter={StaticResource BoolToVisibilityConverter}}" />
                                             <Path Data="{StaticResource IconUsb}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource AccentTextBrush}" Visibility="{Binding IsRemovable, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                            <Path Data="{StaticResource IconDrive}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource TextTertiaryBrush}" Visibility="{Binding IsUnknown, Converter={StaticResource BoolToVisibilityConverter}}" />
                                         </Grid>
                                     </Border>
                                     <StackPanel Grid.Column="1" Margin="9,0,8,0">
@@ -60,8 +89,9 @@
                                     <StackPanel Grid.Column="1"><TextBlock Text="{Binding DataContext.Localization[Common.Free], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource MetricLabelStyle}" /><TextBlock Text="{Binding Free}" FontWeight="SemiBold" Margin="0,3,0,0" /></StackPanel>
                                     <StackPanel Grid.Column="2"><TextBlock Text="{Binding DataContext.Localization[Common.Format], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource MetricLabelStyle}" /><TextBlock Text="{Binding FileSystem}" FontWeight="SemiBold" Margin="0,3,0,0" /></StackPanel>
                                 </Grid>
-                                <Grid Grid.Row="3" Margin="0,18,0,0" VerticalAlignment="Bottom">
-                                    <StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Model}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding Model}" /><TextBlock Text="{Binding MountPath}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,2,0,0" /></StackPanel>
+                                <TextBlock Grid.Row="3" Text="{Binding UnsupportedReason}" Foreground="{DynamicResource CriticalBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,10,0,0" Visibility="{Binding IsUnsupported, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                <Grid Grid.Row="4" Margin="0,16,0,0" VerticalAlignment="Bottom">
+                                    <StackPanel VerticalAlignment="Center" MaxWidth="205"><TextBlock Text="{Binding Model}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding Model}" /><TextBlock Text="{Binding MountPath}" Foreground="{DynamicResource TextTertiaryBrush}" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding MountPath}" /></StackPanel>
                                     <Button Content="{Binding DataContext.Localization[Action.Select], RelativeSource={RelativeSource AncestorType=Window}}" HorizontalAlignment="Right" Command="{Binding DataContext.SelectDeviceCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" IsEnabled="{Binding IsAvailable}" MinWidth="88" />
                                 </Grid>
                             </Grid>
@@ -71,11 +101,11 @@
             </ItemsControl>
         </ScrollViewer>
 
-        <Border Grid.Row="2" Style="{StaticResource PanelStyle}" Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibilityConverter}}">
+        <Border Grid.Row="3" Style="{StaticResource PanelStyle}" Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
                 <Path Data="{StaticResource IconEmpty}" Style="{StaticResource IconPathStyle}" Width="36" Height="36" Stroke="{DynamicResource TextTertiaryBrush}" />
-                <TextBlock Text="{Binding DataContext.Localization[Device.EmptyTitle], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource SectionTitleStyle}" HorizontalAlignment="Center" Margin="0,14,0,0" />
-                <TextBlock Text="{Binding DataContext.Localization[Device.EmptyBody], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" TextAlignment="Center" Margin="0,7,0,0" />
+                <TextBlock Text="{Binding DataContext.Localization[Device.Phase3EmptyTitle], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource SectionTitleStyle}" HorizontalAlignment="Center" Margin="0,14,0,0" />
+                <TextBlock Text="{Binding DataContext.Localization[Device.Phase3EmptyBody], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" TextAlignment="Center" Margin="0,7,0,0" />
             </StackPanel>
         </Border>
     </Grid>

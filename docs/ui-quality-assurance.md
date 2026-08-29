@@ -1,6 +1,6 @@
 # UI quality assurance
 
-Phase 2 keeps discovery, scanning, health estimates, previews, destinations, and recovery entirely mocked. This checklist is for visual and interaction QA on Windows; it does not validate recovery capability.
+Phase 3 uses real metadata-only Windows device discovery in normal Release mode. Scanning, health estimates, previews, destinations, and recovery remain simulated. This checklist does not validate recovery capability.
 
 ## Launch modes
 
@@ -10,7 +10,7 @@ Production-like Release mode hides development tools:
 dotnet run --project src\DataRecoveryStudio.App\DataRecoveryStudio.App.csproj -c Release
 ```
 
-To expose development state previews and the 10,000-result catalog for a single PowerShell session:
+To use explicit mock devices, development state previews, and the 10,000-result catalog for a single PowerShell session:
 
 ```powershell
 $env:DATA_RECOVERY_STUDIO_DEVELOPMENT = '1'
@@ -35,13 +35,14 @@ Do not add QA captures to source control.
 1. Confirm the native title bar drags, snaps, maximizes inside the work area, restores, minimizes, and closes normally.
 2. Navigate the sidebar, device cards, scan methods, progress controls, result filters/list, destination choices, and Settings using Tab, Shift+Tab, arrow keys where supported, Space, and Enter.
 3. Confirm focus is always visible and icon-only elements expose accessible names or adjacent labels.
-4. Select each mock device. The disconnected card must be visibly unavailable and must not continue.
-5. Select Standard and Deep Scan in both languages. Cards must remain equal height with no clipped safety copy.
-6. Start and cancel a mock scan. Decline and accept the confirmation; the canceling message must remain visible until completion.
-7. Search, filter, sort, preview, and multi-select results. Confirm long names and paths trim with tooltips and complete details remain accessible.
-8. In development mode, generate 10,000 items and scroll quickly while searching and switching categories. Rows should recycle without sustained UI stalls.
-9. In the destination dialog, verify focus begins on the first safe destination, the source physical device is blocked, insufficient space is explained, and confirmation enables only for a safe choice.
-10. Switch theme and language, restart, and verify both settings persist.
+4. Confirm mounted NTFS/FAT32/exFAT volumes appear with plausible paths and capacities. Unsupported cards must explain why and must not continue.
+5. Refresh repeatedly and confirm cards are not duplicated. Connect/disconnect USB media and confirm the debounced automatic refresh and selected-source removal state.
+6. Select Standard and Deep Scan in both languages. Cards must remain equal height with no clipped safety copy.
+7. Start and cancel a mock scan. Decline and accept the confirmation; the canceling message must remain visible until completion.
+8. Search, filter, sort, preview, and multi-select results. Confirm long names and paths trim with tooltips and complete details remain accessible.
+9. In development mode, generate 10,000 items and scroll quickly while searching and switching categories. Rows should recycle without sustained UI stalls.
+10. In the destination dialog, verify focus begins on the first safe destination, the source physical device is blocked, insufficient space is explained, and confirmation enables only for a safe choice.
+11. Switch theme and language, restart, and verify both settings persist.
 
 ## Human visual risks to confirm
 

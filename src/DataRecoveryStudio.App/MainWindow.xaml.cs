@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Markup;
+using System.Windows.Interop;
+using System.Windows.Threading;
 using DataRecoveryStudio.Application;
 using DataRecoveryStudio.Core;
 using DataRecoveryStudio.Infrastructure;
@@ -9,16 +11,59 @@ namespace DataRecoveryStudio.App;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
+    private readonly DispatcherTimer _deviceChangeDebounce;
+    private HwndSource? _windowSource;
 
     public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
         ThemeManager.Register(this);
         _viewModel = viewModel;
+        _deviceChangeDebounce = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(450),
+            DispatcherPriority.Background,
+            OnDeviceChangeDebounceElapsed,
+            Dispatcher)
+        {
+            IsEnabled = false,
+        };
         DataContext = viewModel;
         viewModel.Settings.ThemeChanged += (_, theme) => ThemeManager.Apply(theme);
         viewModel.Localization.Service.LanguageChanged += (_, _) => ApplyLanguage(viewModel.Localization.Service.LanguageCode);
         ApplyLanguage(viewModel.Localization.Service.LanguageCode);
+        SourceInitialized += OnSourceInitialized;
+        Closed += OnClosed;
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        _windowSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+        _windowSource?.AddHook(WindowMessageHook);
+    }
+
+    private IntPtr WindowMessageHook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WmDeviceChange = 0x0219;
+        if (message == WmDeviceChange)
+        {
+            _deviceChangeDebounce.Stop();
+            _deviceChangeDebounce.Start();
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private async void OnDeviceChangeDebounceElapsed(object? sender, EventArgs e)
+    {
+        _deviceChangeDebounce.Stop();
+        await _viewModel.RefreshDevicesAsync();
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        _deviceChangeDebounce.Stop();
+        _windowSource?.RemoveHook(WindowMessageHook);
+        _windowSource = null;
     }
 
     public void ShowRecoveryDestinationDialog()
@@ -49,7 +94,8 @@ public partial class MainWindow : Window
             sourceLocation,
             _viewModel.Results.SelectedBytes,
             options,
-            _viewModel.Localization.Service);
+            _viewModel.Localization.Service,
+            source?.PhysicalDeviceIds);
         new RecoveryDestinationWindow(viewModel) { Owner = this }.ShowDialog();
     }
 

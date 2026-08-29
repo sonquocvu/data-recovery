@@ -11,9 +11,10 @@ public enum PageKind
     Settings,
 }
 
-public sealed class MainViewModel : ObservableObject
+public sealed class MainViewModel : ObservableObject, IDisposable
 {
     private PageKind _currentPage = PageKind.Devices;
+    private bool _sourceRemovedDuringScan;
 
     public MainViewModel(
         IDeviceDiscoveryService devices,
@@ -29,6 +30,7 @@ public sealed class MainViewModel : ObservableObject
         Results = new ResultsViewModel(catalog, isDevelopmentMode, localization);
         Settings = new SettingsViewModel(settings, localization, isDevelopmentMode);
         Devices = new DeviceSelectionViewModel(devices, SelectDevice, localization);
+        Devices.DevicesRefreshed += HandleDevicesRefreshed;
         NavigateCommand = new RelayCommand<PageKind>(Navigate);
         ShowLargeDatasetCommand = new RelayCommand(ShowLargeDataset, () => Results.IsDevelopmentMode);
     }
@@ -76,6 +78,8 @@ public sealed class MainViewModel : ObservableObject
         await Devices.LoadAsync().ConfigureAwait(true);
     }
 
+    public Task RefreshDevicesAsync() => Devices.LoadAsync();
+
     public void Navigate(PageKind page)
     {
         if (page == PageKind.Devices)
@@ -88,6 +92,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void SelectDevice(StorageDevice source)
     {
+        _sourceRemovedDuringScan = false;
         ScanMode.Source = source;
         CurrentPage = PageKind.ScanMode;
     }
@@ -100,8 +105,55 @@ public sealed class MainViewModel : ObservableObject
 
     private void ScanFinished(ScanSession session)
     {
+        if (_sourceRemovedDuringScan)
+        {
+            _sourceRemovedDuringScan = false;
+            Results.Reset();
+            ScanMode.Source = null;
+            Devices.ShowNotice("Device.RemovedDuringScan");
+            Devices.PrepareForDisplay();
+            CurrentPage = PageKind.Devices;
+            return;
+        }
+
         CurrentPage = PageKind.Results;
         _ = Results.LoadAsync(session);
+    }
+
+    public void Dispose()
+    {
+        Devices.DevicesRefreshed -= HandleDevicesRefreshed;
+        Devices.Dispose();
+    }
+
+    private void HandleDevicesRefreshed(IReadOnlyList<StorageDevice> devices)
+    {
+        var source = CurrentPage == PageKind.ScanProgress ? ScanProgress.Source : ScanMode.Source;
+        if (source is null)
+        {
+            return;
+        }
+
+        var sourceVolumeId = source.Volumes.FirstOrDefault()?.VolumeGuidPath;
+        var stillPresent = sourceVolumeId is not null && devices.Any(device =>
+            device.Volumes.Any(volume => volume.VolumeGuidPath.Equals(sourceVolumeId, StringComparison.OrdinalIgnoreCase)) &&
+            device.IsSupported);
+        if (stillPresent)
+        {
+            return;
+        }
+
+        if (CurrentPage == PageKind.ScanProgress)
+        {
+            _sourceRemovedDuringScan = true;
+            ScanProgress.CancelForDeviceRemoval();
+            return;
+        }
+
+        ScanMode.Source = null;
+        Devices.ShowNotice("Device.Removed");
+        Devices.PrepareForDisplay();
+        CurrentPage = PageKind.Devices;
     }
 
     private void ShowLargeDataset()

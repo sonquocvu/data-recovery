@@ -14,8 +14,8 @@ public sealed class ScanModeViewModel : ObservableObject
         _goBack = goBack;
         _startScan = startScan;
         BackCommand = new RelayCommand(_goBack);
-        SelectModeCommand = new RelayCommand<ScanModeKind>(SelectMode, _ => Source?.ConnectionStatus == DeviceConnectionStatus.Online);
-        StartScanCommand = new RelayCommand(Start, () => Source?.ConnectionStatus == DeviceConnectionStatus.Online && SelectedMode is not null);
+        SelectModeCommand = new RelayCommand<ScanModeKind>(SelectMode, _ => Source?.IsSupported == true);
+        StartScanCommand = new RelayCommand(Start, () => Source?.IsSupported == true && SelectedMode is not null);
     }
 
     public StorageDevice? Source
@@ -28,7 +28,7 @@ public sealed class ScanModeViewModel : ObservableObject
                 OnPropertyChanged(nameof(SourceContext));
             }
 
-            SelectedMode = value?.ConnectionStatus == DeviceConnectionStatus.Online
+            SelectedMode = value?.IsSupported == true
                 ? ScanModeKind.Standard
                 : null;
             SelectModeCommand.NotifyCanExecuteChanged();
@@ -119,6 +119,7 @@ public sealed class ScanProgressViewModel : ObservableObject
     public bool IsCanceling => State == ScanState.Canceling;
     public bool CanCancel => State is ScanState.Starting or ScanState.Scanning;
     public bool IsCancellationConfirmationOpen => _isCancellationConfirmationOpen;
+    public StorageDevice? Source => _source;
 
     public ScanState State
     {
@@ -206,6 +207,26 @@ public sealed class ScanProgressViewModel : ObservableObject
         _isCancellationConfirmationOpen = true;
         OnPropertyChanged(nameof(IsCancellationConfirmationOpen));
         return true;
+    }
+
+    public void CancelForDeviceRemoval()
+    {
+        var confirmationWasOpen = _isCancellationConfirmationOpen;
+        _isCancellationConfirmationOpen = false;
+        _pendingCompletion = null;
+        if (confirmationWasOpen)
+        {
+            OnPropertyChanged(nameof(IsCancellationConfirmationOpen));
+            CancellationConfirmationInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (State is ScanState.Starting or ScanState.Scanning or ScanState.Canceling)
+        {
+            _cancelRequestIssued = true;
+            State = ScanState.Canceling;
+            Phase = Localize("Progress.Phase.DeviceRemoved");
+            _cancellation?.Cancel();
+        }
     }
 
     public void EndCancellationConfirmation(bool cancelConfirmed)

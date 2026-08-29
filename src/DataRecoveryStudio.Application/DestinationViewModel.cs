@@ -9,11 +9,15 @@ public sealed record DestinationOption(
     long AvailableBytes)
 {
     public string Available => ByteFormatter.Format(AvailableBytes);
+
+    public IReadOnlySet<PhysicalDeviceId> PhysicalDeviceIds { get; init; } =
+        new HashSet<PhysicalDeviceId> { DeviceId };
 }
 
 public sealed class DestinationViewModel : ObservableObject
 {
     private readonly PhysicalDeviceId _sourceDeviceId;
+    private readonly IReadOnlySet<PhysicalDeviceId> _sourceDeviceIds;
     private readonly long _requiredBytes;
     private DestinationOption? _selectedDestination;
     private DestinationValidationResult _validation;
@@ -24,15 +28,17 @@ public sealed class DestinationViewModel : ObservableObject
         string sourceLocation,
         long requiredBytes,
         IReadOnlyList<DestinationOption> destinations,
-        ILocalizationService? localization = null)
+        ILocalizationService? localization = null,
+        IReadOnlySet<PhysicalDeviceId>? sourceDeviceIds = null)
     {
         _sourceDeviceId = sourceDeviceId;
+        _sourceDeviceIds = sourceDeviceIds ?? new HashSet<PhysicalDeviceId> { sourceDeviceId };
         _requiredBytes = requiredBytes;
         Destinations = destinations;
         SourceDisplayName = sourceDisplayName;
         SourceLocation = sourceLocation;
         Localization = localization is null ? null : new LocalizedText(localization);
-        _validation = RecoveryDestinationPolicy.Validate(sourceDeviceId, null, requiredBytes, 0);
+        _validation = RecoveryDestinationPolicy.Validate(_sourceDeviceIds, null, requiredBytes, 0);
     }
 
     public IReadOnlyList<DestinationOption> Destinations { get; }
@@ -58,8 +64,8 @@ public sealed class DestinationViewModel : ObservableObject
             if (SetProperty(ref _selectedDestination, value))
             {
                 _validation = RecoveryDestinationPolicy.Validate(
-                    _sourceDeviceId,
-                    value?.DeviceId,
+                    _sourceDeviceIds,
+                    value?.PhysicalDeviceIds,
                     _requiredBytes,
                     value?.AvailableBytes ?? 0);
                 OnPropertyChanged(nameof(IsValid));

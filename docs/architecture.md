@@ -6,7 +6,7 @@
 |---|---|---|
 | `DataRecoveryStudio.Core` | Immutable domain records, enums, service contracts, validation and safety policies | BCL only |
 | `DataRecoveryStudio.Application` | Use-case orchestration, navigation, commands, view models, filtering and presentation rules | Core |
-| `DataRecoveryStudio.Infrastructure` | Mock device/scan/result adapters, JSON settings, localization, structured local logging; future Windows adapters | Application, Core |
+| `DataRecoveryStudio.Infrastructure` | Windows metadata-only storage discovery, native buffer parsing, mock scan/result adapters, explicit-development mock discovery, JSON settings, localization, and structured logging | Application, Core |
 | `DataRecoveryStudio.App` | WPF composition root, views, dialogs, themes, converters, UI-only behavior | Application, Core, Infrastructure |
 | `DataRecoveryStudio.Tests` | Behavioral tests across non-UI boundaries | Core, Application, Infrastructure |
 
@@ -26,7 +26,17 @@ flowchart LR
 
 ## Main models and interfaces
 
-Core models include `PhysicalDeviceId`, `StorageDevice`, `Volume`, `ScanMode`, `ScanSession`, `ScanProgress`, `RecoverableFile`, `FileCategory`, `RecoverabilityStatus`, `RecoveryRequest`, and `RecoveryResult`. Stable physical IDs are opaque value objects, never inferred solely from drive letters.
+Core models distinguish `PhysicalDisk` hardware metadata from scannable `Volume` filesystem metadata. A volume carries a set of physical identities because Windows volumes may span disks. Stable physical IDs are opaque, hashed value objects and are never inferred from drive letters or display labels.
+
+## Phase 3 discovery flow
+
+`WindowsStorageDiscoveryService` runs on a worker task behind `IDeviceDiscoveryService`. `WindowsStorageNative` exclusively owns the P/Invoke declarations and safe handles. Enumeration flows from volume GUID names to mount paths, filesystem/capacity metadata, disk extents, and optional per-disk storage descriptor/seek-penalty/geometry metadata. Pure parsers validate all byte counts, declared sizes, offsets, null terminators, extent counts, checked arithmetic, and bounded buffers before producing domain data.
+
+Failures in optional physical metadata produce partial labels and session-only identities. A failure for one volume is logged by operation and Win32 code without serials and does not stop other volumes. A top-level enumeration failure is surfaced to the Devices page with Retry; mocks are never substituted.
+
+Normal mode uses real discovery. `DATA_RECOVERY_STUDIO_DEVELOPMENT=1` selects the existing mock device provider explicitly. Both modes continue to use the simulated scan and result services in Phase 3.
+
+WPF receives `WM_DEVICECHANGE`, debounces message bursts for 450 ms, and requests a cancellable refresh. Refresh generations prevent an obsolete result from replacing a newer list. Selected-volume removal invalidates Scan Options; removal during a simulated scan cancels that development session and clears its source/result context.
 
 Key contracts are `IDeviceDiscoveryService`, `IScanService`, `IRecoveryCatalogService`, `ISettingsStore`, `ILocalizationService`, and `IStructuredLogger`. `RecoveryDestinationPolicy` is pure Core logic so every UI or future engine entry point can share the same rule.
 

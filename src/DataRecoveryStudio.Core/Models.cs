@@ -19,9 +19,35 @@ public readonly record struct PhysicalDeviceId
 
 public enum StorageDeviceType
 {
-    Internal,
-    External,
-    RemovableUsb,
+    InternalSsd,
+    InternalHdd,
+    ExternalDrive,
+    UsbDevice,
+    Unknown,
+    Internal = InternalHdd,
+    External = ExternalDrive,
+    RemovableUsb = UsbDevice,
+}
+
+public enum PhysicalIdentityConfidence
+{
+    High,
+    Medium,
+    SessionOnly,
+    Unknown,
+}
+
+public enum StorageBusType
+{
+    Unknown,
+    Scsi,
+    Ata,
+    Sata,
+    Usb,
+    Nvme,
+    Sd,
+    Mmc,
+    Virtual,
 }
 
 public enum DeviceConnectionStatus
@@ -30,6 +56,25 @@ public enum DeviceConnectionStatus
     Disconnected,
     AccessDenied,
 }
+
+public enum VolumeAvailability
+{
+    Available,
+    NoMountPoint,
+    Inaccessible,
+    Disconnected,
+}
+
+public sealed record PhysicalDisk(
+    int? DiskNumber,
+    PhysicalDeviceId Id,
+    PhysicalIdentityConfidence IdentityConfidence,
+    string Model,
+    string Vendor,
+    StorageBusType BusType,
+    bool IsRemovable,
+    long CapacityBytes,
+    StorageDeviceType Type);
 
 public sealed record Volume(
     string Id,
@@ -41,6 +86,19 @@ public sealed record Volume(
     PhysicalDeviceId PhysicalDeviceId)
 {
     public long FreeBytes => Math.Max(0, CapacityBytes - UsedBytes);
+
+    public string VolumeGuidPath { get; init; } = Id;
+
+    public IReadOnlyList<string> MountPaths { get; init; } = [MountPath];
+
+    public IReadOnlySet<PhysicalDeviceId> PhysicalDeviceIds { get; init; } =
+        new HashSet<PhysicalDeviceId> { PhysicalDeviceId };
+
+    public VolumeAvailability Availability { get; init; } = VolumeAvailability.Available;
+
+    public bool IsSupported { get; init; } = true;
+
+    public string? UnsupportedReasonKey { get; init; }
 }
 
 public sealed record StorageDevice(
@@ -56,6 +114,16 @@ public sealed record StorageDevice(
     public long UsedBytes => Volumes.Sum(volume => volume.UsedBytes);
 
     public long FreeBytes => Volumes.Sum(volume => volume.FreeBytes);
+
+    public IReadOnlyList<PhysicalDisk> PhysicalDisks { get; init; } = [];
+
+    public IReadOnlySet<PhysicalDeviceId> PhysicalDeviceIds { get; init; } =
+        Volumes.SelectMany(volume => volume.PhysicalDeviceIds).ToHashSet();
+
+    public bool IsSupported =>
+        ConnectionStatus == DeviceConnectionStatus.Online &&
+        Volumes.Count > 0 &&
+        Volumes.All(volume => volume.IsSupported && volume.Availability == VolumeAvailability.Available);
 }
 
 public enum ScanModeKind

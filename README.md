@@ -1,6 +1,6 @@
 # Data Recovery Studio
 
-Phase 1 foundation for a safe, modern Windows 10/11 data-recovery application. All device discovery, scanning, preview, and recovery behavior is currently simulated. The application does **not** access raw disks or request administrator rights.
+Phase 3 foundation for a safe, modern Windows 10/11 data-recovery application. Normal Release mode performs real, metadata-only discovery of mounted Windows volumes and their physical storage descriptors. Scanning, deleted-file discovery, preview, and recovery remain explicitly simulated. The application does **not** read raw sectors, write storage devices, or request administrator rights.
 
 ## Build
 
@@ -12,5 +12,7 @@ dotnet run --project src/DataRecoveryStudio.App/DataRecoveryStudio.App.csproj -c
 ```
 
 See `docs/` for the product, architecture, safety rules, and phased roadmap.
+
+Set `DATA_RECOVERY_STUDIO_DEVELOPMENT=1` before launch only when explicit mock-device fixtures are needed. A production discovery failure is shown as an error and never falls back to mocks.
 
 UI inspection and development-mode instructions are in `docs/ui-quality-assurance.md`.
