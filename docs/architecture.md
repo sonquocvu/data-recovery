@@ -4,9 +4,9 @@
 
 | Project | Responsibility | May depend on |
 |---|---|---|
-| `DataRecoveryStudio.Core` | Immutable domain records, enums, service contracts, validation and safety policies | BCL only |
-| `DataRecoveryStudio.Application` | Use-case orchestration, navigation, commands, view models, filtering and presentation rules | Core |
-| `DataRecoveryStudio.Infrastructure` | Windows metadata-only storage discovery, native buffer parsing, mock scan/result adapters, explicit-development mock discovery, JSON settings, localization, and structured logging | Application, Core |
+| `DataRecoveryStudio.Core` | Immutable domain records, enums, read-only scan/source and trusted-recovery contracts, validation and safety policies | BCL only |
+| `DataRecoveryStudio.Application` | Use-case orchestration, trusted image-scan sessions and plans, navigation, commands, view models, filtering and presentation rules | Core |
+| `DataRecoveryStudio.Infrastructure` | Windows metadata-only storage discovery, safe ordinary-file/in-memory byte sources, defensive NTFS parsing and image-only extraction, atomic destination writing, mock adapters, settings, localization, and logging | Application, Core |
 | `DataRecoveryStudio.App` | WPF composition root, views, dialogs, themes, converters, UI-only behavior | Application, Core, Infrastructure |
 | `DataRecoveryStudio.Tests` | Behavioral tests across non-UI boundaries | Core, Application, Infrastructure |
 
@@ -34,7 +34,7 @@ Core models distinguish `PhysicalDisk` hardware metadata from scannable `Volume`
 
 Failures in optional physical metadata produce partial labels and session-only identities. A failure for one volume is logged by operation and Win32 code without serials and does not stop other volumes. A top-level enumeration failure is surfaced to the Devices page with Retry; mocks are never substituted.
 
-Normal mode uses real discovery. `DATA_RECOVERY_STUDIO_DEVELOPMENT=1` selects the existing mock device provider explicitly. Both modes continue to use the simulated scan and result services in Phase 3.
+Normal mode uses real discovery. `DATA_RECOVERY_STUDIO_DEVELOPMENT=1` selects the existing mock device provider explicitly. The WPF composition continues to use simulated scan and result services; Phase 4A's headless NTFS image scanner is not composed with a discovered volume.
 
 WPF receives `WM_DEVICECHANGE`, debounces message bursts for 450 ms, and requests a cancellable refresh. Refresh generations prevent an obsolete result from replacing a newer list. Selected-volume removal invalidates Scan Options; removal during a simulated scan cancels that development session and clears its source/result context.
 
@@ -50,12 +50,12 @@ Settings are a versioned JSON document stored under `%LocalAppData%/DataRecovery
 
 Localization uses stable keys behind `ILocalizationService`, an English fallback dictionary, and a Vietnamese dictionary. The service raises a language-change notification so all bound primary navigation/page text refreshes without rebuilding view models. Additional cultures can be added without view changes.
 
-## Planned scan pipeline
+## Scan pipeline foundation
 
 ```mermaid
 flowchart LR
-  Select[Validated source] --> Open[Read-only device handle]
-  Open --> Snapshot[Capture identity / geometry]
+  Select[Explicit ordinary image path] --> Open[Read-only image stream]
+  Open --> Snapshot[Validate NTFS boot geometry]
   Snapshot --> Reader[Bounded async block reader]
   Reader --> Parser[Filesystem parser or signature matcher]
   Parser --> Normalize[Normalize candidates]
@@ -63,11 +63,11 @@ flowchart LR
   Estimate --> Catalog[Incremental result catalog]
 ```
 
-Standard scanners will use isolated NTFS/FAT/exFAT parsers. Deep scanners will consume the same read-only block abstraction and a documented signature registry. Neither receives a write-capable handle. Bounded channels provide backpressure and memory limits.
+The Phase 4B standard scanner uses isolated NTFS parsing behind `IReadOnlyRandomAccessSource`; no writable stream or native handle reaches it. It derives the MFT layout from record zero, traverses fragmented virtual extents, resolves bounded attribute-list extensions, reconstructs hard-link paths, and queries `$Bitmap` through a bounded cache. Phase 4C reuses that production parser for source/record/stream revalidation and streams supported image payload bytes to a separate validated destination. Future FAT/exFAT and deep scanners will consume the same read-only abstraction and a documented signature registry.
 
-## Planned recovery pipeline
+## Phase 4C image-recovery pipeline
 
-Validate request and physical identities → reserve a collision-safe destination → re-open the source read-only → read known extents or carved ranges → write only through a destination abstraction → optionally verify size/hash → atomically finalize the destination file → return per-file results. Failures leave explicit partial outcomes and cleanable temporary files only on the destination.
+Completed image scan → retain opaque session/candidate provenance → build a no-run-list plan → validate destination → reopen the ordinary image read-only → rescan and re-resolve current NTFS metadata → stream supported resident/non-resident bytes through a create-new partial → flush and move without overwrite → hash the published file → return immutable per-file and batch outcomes. Failures and cancellation remove partial/unverified files; normal WPF routes cannot invoke this pipeline.
 
 ## Cancellation, progress, and errors
 
