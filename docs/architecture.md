@@ -8,6 +8,7 @@
 | `DataRecoveryStudio.Application` | Use-case orchestration, trusted image-scan sessions and plans, navigation, commands, view models, filtering and presentation rules | Core |
 | `DataRecoveryStudio.Infrastructure` | Windows metadata-only storage discovery, safe ordinary-file/in-memory byte sources, defensive NTFS parsing and image-only extraction, atomic destination writing, mock adapters, settings, localization, and logging | Application, Core |
 | `DataRecoveryStudio.App` | WPF composition root, views, dialogs, themes, converters, UI-only behavior | Application, Core, Infrastructure |
+| `DataRecoveryStudio.ScanWorker` | One-shot elevated Windows x64 host for authenticated, read-only live NTFS metadata scans | Core, Infrastructure |
 | `DataRecoveryStudio.Tests` | Behavioral tests across non-UI boundaries | Core, Application, Infrastructure |
 
 Core never references WPF, storage APIs, or infrastructure. Application code receives contracts through constructors. Infrastructure implements those contracts. The App composition root creates and connects implementations; this gives dependency injection without a service-locator or runtime container dependency.
@@ -20,8 +21,8 @@ flowchart LR
   Infrastructure --> Core
   Application --> Core
   Core --> Policies[Safety policies]
-  Infrastructure -. future .-> Broker[Minimal privileged read-only broker]
-  Broker -. read-only .-> Device[Physical device]
+  Infrastructure --> Worker[One-shot elevated scan worker]
+  Worker -. GENERIC_READ volume handle .-> Device[Authorized mounted NTFS volume]
 ```
 
 ## Main models and interfaces
@@ -77,4 +78,4 @@ Expected media failures are typed, recoverable records associated with offsets. 
 
 ## Raw-device isolation and privilege
 
-Phase 1 has no raw-device implementation. Future Windows access belongs in Infrastructure behind `IReadOnlyBlockDevice`, with safe handles and read-only access flags. If elevation is unavoidable, a minimal separately deployed broker will expose only allow-listed read operations over an authenticated local IPC channel. The WPF process and domain/application assemblies remain unprivileged and cannot call destructive disk-management APIs.
+Phase 5A isolates live volume access in a one-shot elevated worker. The parent grants only a current discovered mounted NTFS volume, creates a random current-user-only named pipe, authenticates the worker with a per-session nonce, and accepts bounded normalized metadata only. The live handle is `GENERIC_READ`, share mode 7, `OPEN_EXISTING`; no physical-disk or arbitrary-offset command exists. The WPF process remains `asInvoker`, and its normal scan command is not connected to this headless service. See `phase-5a-live-ntfs-scan.md`.

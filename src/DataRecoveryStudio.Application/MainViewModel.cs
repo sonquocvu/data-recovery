@@ -15,6 +15,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 {
     private PageKind _currentPage = PageKind.Devices;
     private bool _sourceRemovedDuringScan;
+    private readonly bool _isDevelopmentMode;
+    private readonly bool _liveStandardScanEnabled;
+    private readonly ILiveScanUiOrchestrator? _liveOrchestrator;
+    private PageKind? _pendingNavigation;
 
     public MainViewModel(
         IDeviceDiscoveryService devices,
@@ -22,11 +26,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         IRecoveryCatalogService catalog,
         ISettingsStore settings,
         ILocalizationService localization,
-        bool isDevelopmentMode = false)
+        bool isDevelopmentMode = false,
+        bool liveStandardScanEnabled = false,
+        ILiveScanUiOrchestrator? liveOrchestrator = null)
     {
+        _isDevelopmentMode = isDevelopmentMode;
+        _liveStandardScanEnabled = liveStandardScanEnabled;
+        _liveOrchestrator = liveOrchestrator;
         Localization = new LocalizedText(localization);
-        ScanMode = new ScanModeViewModel(() => Navigate(PageKind.Devices), BeginScan);
-        ScanProgress = new ScanProgressViewModel(scan, ScanFinished, localization);
+        ScanMode = new ScanModeViewModel(() => Navigate(PageKind.Devices), BeginScan, localization, isDevelopmentMode, liveStandardScanEnabled);
+        ScanProgress = new ScanProgressViewModel(scan, ScanFinished, localization, liveOrchestrator, LiveScanFinished);
         Results = new ResultsViewModel(catalog, isDevelopmentMode, localization);
         Settings = new SettingsViewModel(settings, localization, isDevelopmentMode);
         Devices = new DeviceSelectionViewModel(devices, SelectDevice, localization);
@@ -43,6 +52,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public SettingsViewModel Settings { get; }
     public RelayCommand<PageKind> NavigateCommand { get; }
     public RelayCommand ShowLargeDatasetCommand { get; }
+    public event Action<PageKind>? NavigationCancellationRequested;
+    public event EventHandler? ScanTerminal;
+    public bool IsDevelopmentMode => _isDevelopmentMode;
+    public bool IsLiveStandardScanEnabled => _liveStandardScanEnabled;
+    public bool IsProductionFeatureDisabled => !_isDevelopmentMode && !_liveStandardScanEnabled;
 
     public PageKind CurrentPage
     {
@@ -82,6 +96,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public void Navigate(PageKind page)
     {
+        if (ScanProgress.IsActive && page != PageKind.ScanProgress)
+        {
+            NavigationCancellationRequested?.Invoke(page);
+            return;
+        }
+
+        NavigateImmediately(page);
+    }
+
+    public void ConfirmNavigationAfterCancellation(PageKind page)
+    {
+        if (!ScanProgress.IsActive)
+        {
+            NavigateImmediately(page);
+            return;
+        }
+
+        _pendingNavigation = page;
+        ScanProgress.RequestCancellation();
+    }
+
+    private void NavigateImmediately(PageKind page)
+    {
         if (page == PageKind.Devices)
         {
             Devices.PrepareForDisplay();
@@ -99,12 +136,38 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void BeginScan(StorageDevice source, ScanModeKind mode)
     {
+        if (ScanProgress.IsActive)
+        {
+            return;
+        }
+
         CurrentPage = PageKind.ScanProgress;
-        _ = ScanProgress.StartAsync(source, mode);
+        if (!_isDevelopmentMode && mode == ScanModeKind.Standard && ScanMode.Capability?.IsLive == true && _liveOrchestrator is not null)
+        {
+            _ = ScanProgress.StartLiveAsync(source);
+            return;
+        }
+
+        if (_isDevelopmentMode)
+        {
+            _ = ScanProgress.StartAsync(source, mode);
+        }
+        else
+        {
+            CurrentPage = PageKind.ScanMode;
+        }
     }
 
     private void ScanFinished(ScanSession session)
     {
+        ScanTerminal?.Invoke(this, EventArgs.Empty);
+        if (_pendingNavigation is PageKind pending)
+        {
+            _pendingNavigation = null;
+            NavigateImmediately(pending);
+            return;
+        }
+
         if (_sourceRemovedDuringScan)
         {
             _sourceRemovedDuringScan = false;
@@ -120,6 +183,39 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _ = Results.LoadAsync(session);
     }
 
+    private void LiveScanFinished(LiveScanUiSession session)
+    {
+        ScanTerminal?.Invoke(this, EventArgs.Empty);
+        if (_pendingNavigation is PageKind pending)
+        {
+            _pendingNavigation = null;
+            NavigateImmediately(pending);
+            return;
+        }
+
+        var status = session.Result.Terminal.Status;
+        if (_sourceRemovedDuringScan || status is LiveScanTerminalStatus.SourceRemoved or LiveScanTerminalStatus.TargetChanged)
+        {
+            _sourceRemovedDuringScan = false;
+            Results.Reset();
+            ScanMode.Source = null;
+            Devices.ShowNotice("Device.LiveSourceRemoved");
+            Devices.PrepareForDisplay();
+            CurrentPage = PageKind.Devices;
+            return;
+        }
+
+        if (status is LiveScanTerminalStatus.Completed or LiveScanTerminalStatus.Partial or LiveScanTerminalStatus.ChangedDuringScan)
+        {
+            CurrentPage = PageKind.Results;
+            _ = Results.LoadLiveAsync(session);
+            return;
+        }
+
+        ScanMode.ShowOutcome(LiveScanOutcomeLocalization.GetLocalizationKey(status));
+        CurrentPage = PageKind.ScanMode;
+    }
+
     public void Dispose()
     {
         Devices.DevicesRefreshed -= HandleDevicesRefreshed;
@@ -128,18 +224,21 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void HandleDevicesRefreshed(IReadOnlyList<StorageDevice> devices)
     {
+        _liveOrchestrator?.UpdateDiscoverySnapshot(devices);
         var source = CurrentPage == PageKind.ScanProgress ? ScanProgress.Source : ScanMode.Source;
         if (source is null)
         {
             return;
         }
 
-        var sourceVolumeId = source.Volumes.FirstOrDefault()?.VolumeGuidPath;
-        var stillPresent = sourceVolumeId is not null && devices.Any(device =>
-            device.Volumes.Any(volume => volume.VolumeGuidPath.Equals(sourceVolumeId, StringComparison.OrdinalIgnoreCase)) &&
-            device.IsSupported);
-        if (stillPresent)
+        var replacement = devices.FirstOrDefault(device => IsSameSource(source, device));
+        if (replacement is not null && replacement.IsSupported)
         {
+            if (CurrentPage != PageKind.ScanProgress)
+            {
+                ScanMode.Source = replacement;
+            }
+
             return;
         }
 
@@ -154,6 +253,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Devices.ShowNotice("Device.Removed");
         Devices.PrepareForDisplay();
         CurrentPage = PageKind.Devices;
+    }
+
+    private static bool IsSameSource(StorageDevice expected, StorageDevice current)
+    {
+        var expectedVolume = expected.Volumes.SingleOrDefault();
+        var currentVolume = current.Volumes.SingleOrDefault();
+        if (expectedVolume is null || currentVolume is null) return false;
+        return expected.ConnectionStatus == current.ConnectionStatus &&
+            expectedVolume.VolumeGuidPath.Equals(currentVolume.VolumeGuidPath, StringComparison.OrdinalIgnoreCase) &&
+            expectedVolume.MountPath.Equals(currentVolume.MountPath, StringComparison.OrdinalIgnoreCase) &&
+            expectedVolume.FileSystem.Equals(currentVolume.FileSystem, StringComparison.OrdinalIgnoreCase) &&
+            expectedVolume.CapacityBytes == currentVolume.CapacityBytes &&
+            expectedVolume.PhysicalDeviceIds.Select(id => id.Value).ToHashSet(StringComparer.Ordinal)
+                .SetEquals(currentVolume.PhysicalDeviceIds.Select(id => id.Value)) &&
+            expected.PhysicalDisks.Select(disk => disk.DiskNumber).ToHashSet()
+                .SetEquals(current.PhysicalDisks.Select(disk => disk.DiskNumber));
     }
 
     private void ShowLargeDataset()

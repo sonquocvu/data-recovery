@@ -38,7 +38,8 @@ public sealed record StandardScanBudgets(
     int MaximumAttributeListBytes = 4 * 1024 * 1024,
     int MaximumBitmapCacheBytes = 256 * 1024,
     int MaximumAlternatePaths = 32,
-    int MaximumPathCharacters = 32 * 1024)
+    int MaximumPathCharacters = 32 * 1024,
+    int MaximumCandidates = 100_000)
 {
     public void Validate()
     {
@@ -46,7 +47,7 @@ public sealed record StandardScanBudgets(
             MaximumDiagnostics <= 0 || MaximumPathDepth <= 0 || MaximumFilenameLength <= 0 || MaximumDataRuns <= 0 ||
             MaximumMftExtents <= 0 || MaximumAttributeListEntries <= 0 || MaximumExtensionRecords <= 0 ||
             MaximumExtensionDepth <= 0 || MaximumAttributeListBytes <= 0 || MaximumBitmapCacheBytes <= 0 ||
-            MaximumAlternatePaths <= 0 || MaximumPathCharacters <= 0)
+            MaximumAlternatePaths <= 0 || MaximumPathCharacters <= 0 || MaximumCandidates <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(StandardScanBudgets), "All scan safety budgets must be positive.");
         }

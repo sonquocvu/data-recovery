@@ -12,7 +12,9 @@
         <Grid>
             <StackPanel>
                 <TextBlock Text="{Binding DataContext.Localization[Device.Title], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageTitleStyle}" />
-                <TextBlock Text="{Binding DataContext.Localization[Device.Phase3Subtitle], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageSubtitleStyle}" Margin="0,8,0,0" MaxWidth="720" HorizontalAlignment="Left" />
+                <TextBlock Text="{Binding DataContext.Localization[Device.Subtitle], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,8,0,0" MaxWidth="720" HorizontalAlignment="Left" Visibility="{Binding DataContext.IsDevelopmentMode, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}" />
+                <TextBlock Text="{Binding DataContext.Localization[Device.LiveSubtitle], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,8,0,0" MaxWidth="720" HorizontalAlignment="Left" Visibility="{Binding DataContext.IsLiveStandardScanEnabled, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}" />
+                <TextBlock Text="{Binding DataContext.Localization[Device.GatedSubtitle], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,8,0,0" MaxWidth="720" HorizontalAlignment="Left" Visibility="{Binding DataContext.IsProductionFeatureDisabled, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}" />
             </StackPanel>
             <Button Command="{Binding RefreshCommand}" HorizontalAlignment="Right" VerticalAlignment="Top" AutomationProperties.Name="{Binding DataContext.Localization[Action.Refresh], RelativeSource={RelativeSource AncestorType=Window}}">
                 <StackPanel Orientation="Horizontal"><Path Data="{StaticResource IconRefresh}" Style="{StaticResource IconPathStyle}" Width="16" Height="16" /><TextBlock Text="{Binding DataContext.Localization[Action.Refresh], RelativeSource={RelativeSource AncestorType=Window}}" Margin="8,0,0,0" /></StackPanel>
@@ -22,7 +24,11 @@
         <Border Grid.Row="1" Margin="0,20,0,12" Background="{DynamicResource InformationSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="14,11">
             <StackPanel Orientation="Horizontal">
                 <Path Data="{StaticResource IconInfo}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource InformationBrush}" Width="18" Height="18" />
-                <TextBlock Text="{Binding DataContext.Localization[Device.Phase3Context], RelativeSource={RelativeSource AncestorType=Window}}" Margin="10,0,0,0" Foreground="{DynamicResource InformationBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <StackPanel Margin="10,0,0,0">
+                    <TextBlock Text="{Binding DataContext.Localization[Device.SafePreview], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource InformationBrush}" TextWrapping="Wrap" Visibility="{Binding DataContext.IsDevelopmentMode, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    <TextBlock Text="{Binding DataContext.Localization[Device.LiveContext], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource InformationBrush}" TextWrapping="Wrap" Visibility="{Binding DataContext.IsLiveStandardScanEnabled, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    <TextBlock Text="{Binding DataContext.Localization[Device.GatedContext], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource InformationBrush}" TextWrapping="Wrap" Visibility="{Binding DataContext.IsProductionFeatureDisabled, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                </StackPanel>
             </StackPanel>
         </Border>
 

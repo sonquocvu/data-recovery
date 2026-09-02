@@ -31,16 +31,31 @@ public partial class App : System.Windows.Application
             Environment.GetEnvironmentVariable("DATA_RECOVERY_STUDIO_DEVELOPMENT"),
             "1",
             StringComparison.Ordinal);
+        var liveStandardScanEnabled = !isDevelopmentMode && LiveStandardScanFeatureGate.IsEnabled();
         IDeviceDiscoveryService discovery = isDevelopmentMode
             ? new MockDeviceDiscoveryService()
             : new WindowsStorageDiscoveryService(logger: _logger);
+        IScanService scanService = isDevelopmentMode ? new MockScanService() : new UnavailableScanService();
+        IRecoveryCatalogService catalogService = isDevelopmentMode ? new MockRecoveryCatalogService() : new UnavailableRecoveryCatalogService();
+        ILiveScanUiOrchestrator? liveOrchestrator = null;
+        if (liveStandardScanEnabled)
+        {
+            var authority = new LiveScanTargetGrantAuthority();
+            var workerClient = new NamedPipeLiveScanWorkerClient(AppContext.BaseDirectory, logger: _logger);
+            liveOrchestrator = new LiveScanUiOrchestrator(
+                authority,
+                new HeadlessLiveStandardScanService(authority, workerClient));
+        }
+
         _viewModel = new MainViewModel(
             discovery,
-            new MockScanService(),
-            new MockRecoveryCatalogService(),
+            scanService,
+            catalogService,
             new JsonSettingsStore(logger: _logger),
             _localization,
-            isDevelopmentMode);
+            isDevelopmentMode,
+            liveStandardScanEnabled,
+            liveOrchestrator);
         var window = new MainWindow(_viewModel);
         MainWindow = window;
 
@@ -49,9 +64,10 @@ public partial class App : System.Windows.Application
             "ApplicationStarting",
             CreateRuntimeProperties(new Dictionary<string, object?>
             {
-                ["phase"] = 3,
-                ["dataMode"] = isDevelopmentMode ? "explicit-development-mock" : "windows-metadata",
+                ["phase"] = "5B",
+                ["dataMode"] = isDevelopmentMode ? "explicit-development-mock" : liveStandardScanEnabled ? "gated-live-standard-scan" : "windows-metadata-only",
                 ["developmentMode"] = isDevelopmentMode,
+                ["liveStandardScanEnabled"] = liveStandardScanEnabled,
             }));
         await _viewModel.InitializeAsync();
         ApplyCurrentCulture(_localization.LanguageCode);

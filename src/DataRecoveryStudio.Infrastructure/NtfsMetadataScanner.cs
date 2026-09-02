@@ -156,6 +156,14 @@ public sealed class NtfsMetadataScanner : INtfsMetadataScanner
         foreach (var logicalRecord in resolved.Values.Where(record => !record.Base.IsInUse).OrderBy(record => record.Base.RecordNumber))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (candidates.Count >= budgets.MaximumCandidates)
+            {
+                outcome = StandardScanOutcome.Partial;
+                partialReason = "MaximumCandidates";
+                diagnostics.Add("SCAN_CANDIDATE_BUDGET_REACHED", ScanDiagnosticSeverity.Warning, "candidate-normalization", "The candidate budget was reached; results are partial.");
+                break;
+            }
+
             var validatedStreams = ValidateCandidateStreams(source, readBudget, request.Volume.VolumeOffset, volumeEnd, validGeometry, logicalRecord, budgets, diagnostics);
             var primaryName = logicalRecord.PrimaryFileName;
             var links = new List<NtfsFileLink>();

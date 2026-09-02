@@ -22,6 +22,12 @@ These invariants are release-blocking requirements, not recommendations.
 18. **Contained no-overwrite destination:** output is created only beneath a validated ordinary destination root. Reparse points, traversal, device names, unsafe NTFS names, overwrite modes, and source-image destinations are rejected.
 19. **Atomic verified output:** each file is streamed through a create-new destination-side partial, flushed, moved without overwrite, and SHA-256/byte-count verified. Cancellation and failure clean partial or unverified publication paths; hash equality proves copied-byte equality only.
 20. **No production recovery route:** Phase 4C is headless and image-only. Phase 3 models and normal WPF device/scan/results/recovery controls cannot invoke it.
+21. **One-time live authority:** a live target must be the exact selection from the current in-process Phase 3 snapshot. Grants expire, are generation-bound, carry a random nonce, are consumed once, and are never persisted.
+22. **Canonical live target only:** the worker accepts only a canonical volume GUID path. Physical disks, drive letters, UNC paths, aliases, arbitrary paths, and path components are rejected before opening.
+23. **Read-only live handle:** the Phase 5A scan-data handle uses exactly `GENERIC_READ`, share mode 7, `OPEN_EXISTING`, and a safe handle. No worker import or command can write, lock, dismount, recover, or return arbitrary source bytes.
+24. **Authenticated bounded worker:** the parent launches one deterministic installation-relative elevated worker and communicates over a random current-user-only, nonce-authenticated, versioned, length-bounded pipe. The worker performs one session and exits.
+25. **Live best-effort only:** bootstrap geometry and MFT layout fingerprints are compared around enumeration. A change makes the result partial/changed; even an unchanged scan is not described as a snapshot.
+26. **No WPF live route:** Phase 5A headless orchestration is intentionally absent from normal WPF commands. Startup remains unelevated and opens no live scan-data handle.
 
 ## Enforcement strategy
 

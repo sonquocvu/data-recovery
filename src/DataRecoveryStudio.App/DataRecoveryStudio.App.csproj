@@ -4,6 +4,8 @@
     <ProjectReference Include="..\DataRecoveryStudio.Core\DataRecoveryStudio.Core.csproj" />
     <ProjectReference Include="..\DataRecoveryStudio.Application\DataRecoveryStudio.Application.csproj" />
     <ProjectReference Include="..\DataRecoveryStudio.Infrastructure\DataRecoveryStudio.Infrastructure.csproj" />
+    <ProjectReference Include="..\DataRecoveryStudio.ScanWorker\DataRecoveryStudio.ScanWorker.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -16,5 +18,12 @@
     <AssemblyName>DataRecoveryStudio</AssemblyName>
     <RootNamespace>DataRecoveryStudio.App</RootNamespace>
   </PropertyGroup>
+
+  <Target Name="CopyScanWorkerToApplicationDirectory" AfterTargets="Build">
+    <ItemGroup>
+      <_ScanWorkerFiles Include="$(MSBuildProjectDirectory)\..\DataRecoveryStudio.ScanWorker\bin\$(Platform)\$(Configuration)\net8.0-windows\win-x64\DataRecoveryStudio.ScanWorker.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ScanWorkerFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

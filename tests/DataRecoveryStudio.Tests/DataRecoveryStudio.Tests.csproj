@@ -27,6 +27,14 @@
     <ProjectReference Include="..\..\src\DataRecoveryStudio.Application\DataRecoveryStudio.Application.csproj" />
     <ProjectReference Include="..\..\src\DataRecoveryStudio.Infrastructure\DataRecoveryStudio.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\DataRecoveryStudio.App\DataRecoveryStudio.App.csproj" />
+    <ProjectReference Include="..\..\src\DataRecoveryStudio.ScanWorker\DataRecoveryStudio.ScanWorker.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <Target Name="CopyScanWorkerToTestDirectory" AfterTargets="Build">
+    <ItemGroup>
+      <_ScanWorkerFiles Include="$(MSBuildProjectDirectory)\..\..\src\DataRecoveryStudio.ScanWorker\bin\$(Platform)\$(Configuration)\net8.0-windows\win-x64\DataRecoveryStudio.ScanWorker.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ScanWorkerFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

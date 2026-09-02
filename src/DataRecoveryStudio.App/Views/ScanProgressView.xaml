@@ -1,36 +1,47 @@
 <UserControl x:Class="DataRecoveryStudio.App.Views.ScanProgressView"
-             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Grid Margin="{StaticResource PageMargin}" MaxWidth="900" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <Border Style="{StaticResource ElevatedPanelStyle}" Padding="32">
-            <Grid>
-                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                <StackPanel Grid.Row="0" HorizontalAlignment="Center">
-                    <Border Width="58" Height="58" CornerRadius="{StaticResource RadiusXLarge}" Background="{DynamicResource AccentSubtleBrush}" HorizontalAlignment="Center">
-                        <Path Data="{StaticResource IconScanDeep}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource AccentTextBrush}" Width="30" Height="30" HorizontalAlignment="Center" VerticalAlignment="Center" />
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="{StaticResource PageMargin}" MaxWidth="900" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Border Style="{StaticResource ElevatedPanelStyle}" Padding="32">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <StackPanel HorizontalAlignment="Center">
+                        <Border Width="58" Height="58" CornerRadius="{StaticResource RadiusXLarge}" Background="{DynamicResource AccentSubtleBrush}" HorizontalAlignment="Center">
+                            <Path Data="{StaticResource IconScanFast}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource AccentTextBrush}" Width="30" Height="30" HorizontalAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="{Binding Phase, Mode=OneWay}"/>
+                        </Border>
+                        <TextBlock Text="{Binding DataContext.Localization[Progress.Title], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageTitleStyle}" HorizontalAlignment="Center" Margin="0,18,0,0"/>
+                        <TextBlock HorizontalAlignment="Center" Margin="0,6,0,0" TextAlignment="Center" TextWrapping="Wrap">
+                            <Run Text="{Binding SourceDisplayName, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding SourceMountPath, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding SourceFileSystem, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding ModeName, Mode=OneWay}"/>
+                        </TextBlock>
+                        <Border Background="{DynamicResource InformationSubtleBrush}" CornerRadius="{StaticResource RadiusSmall}" Padding="10,5" HorizontalAlignment="Center" Margin="0,12,0,0" Visibility="{Binding IsLiveScan, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <StackPanel><TextBlock Text="{Binding DataContext.Localization[Progress.ReadOnlyKind], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource InformationBrush}" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock Text="{Binding LiveDisclosure, Mode=OneWay}" Foreground="{DynamicResource InformationBrush}" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/><TextBlock Text="{Binding ReadOnlyDisclosure, Mode=OneWay}" Foreground="{DynamicResource InformationBrush}" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/></StackPanel>
+                        </Border>
+                        <Border Background="{DynamicResource InformationSubtleBrush}" CornerRadius="{StaticResource RadiusSmall}" Padding="10,5" HorizontalAlignment="Center" Margin="0,12,0,0" Visibility="{Binding IsMockScan, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock Text="{Binding DataContext.Localization[Progress.MockEstimate], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource InformationBrush}" FontSize="10"/>
+                        </Border>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" Margin="0,26,0,10" AutomationProperties.LiveSetting="Polite">
+                        <TextBlock Text="{Binding Phase, Mode=OneWay}" FontSize="14" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding Percentage, Mode=OneWay, StringFormat={}{0:0}%}" HorizontalAlignment="Right" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource AccentTextBrush}" Visibility="{Binding HasDeterminateProgress, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    </Grid>
+                    <ProgressBar Grid.Row="2" Value="{Binding Percentage, Mode=OneWay}" Maximum="100" Height="10" IsIndeterminate="{Binding IsIndeterminate, Mode=OneWay}" AutomationProperties.Name="{Binding Phase, Mode=OneWay}"/>
+
+                    <UniformGrid Grid.Row="3" Columns="4" Margin="0,24,0,0">
+                        <Border Style="{StaticResource SubtlePanelStyle}" Padding="12" Margin="0,0,6,0"><StackPanel><TextBlock Text="{Binding DataContext.Localization[Progress.RecordsExamined], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource MetricLabelStyle}" TextWrapping="Wrap" Visibility="{Binding IsLiveScan, Converter={StaticResource BoolToVisibilityConverter}}"/><TextBlock Text="{Binding DataContext.Localization[Progress.Scanned], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource MetricLabelStyle}" Visibility="{Binding IsMockScan, Converter={StaticResource BoolToVisibilityConverter}}"/><TextBlock Text="{Binding AmountScanned, Mode=OneWay}" FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" Margin="0,5,0,0" TextWrapping="Wrap"/></StackPanel></Border>
+                        <Border Style="{StaticResource SubtlePanelStyle}" Padding="12" Margin="2,0,4,0"><StackPanel><TextBlock Text="{Binding DataContext.Localization[Progress.Elapsed], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource MetricLabelStyle}"/><TextBlock Text="{Binding ElapsedText, Mode=OneWay}" FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" Margin="0,5,0,0"/></StackPanel></Border>
+                        <Border Style="{StaticResource SubtlePanelStyle}" Padding="12" Margin="4,0,2,0"><StackPanel><TextBlock Text="{Binding DataContext.Localization[Progress.Remaining], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource MetricLabelStyle}" TextWrapping="Wrap"/><TextBlock Text="{Binding RemainingText, Mode=OneWay}" FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap"/></StackPanel></Border>
+                        <Border Style="{StaticResource SubtlePanelStyle}" Padding="12" Margin="6,0,0,0"><StackPanel><TextBlock Text="{Binding DataContext.Localization[Progress.CandidatesFound], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource MetricLabelStyle}" TextWrapping="Wrap" Visibility="{Binding IsLiveScan, Converter={StaticResource BoolToVisibilityConverter}}"/><TextBlock Text="{Binding DataContext.Localization[Progress.FilesFound], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource MetricLabelStyle}" Visibility="{Binding IsMockScan, Converter={StaticResource BoolToVisibilityConverter}}"/><TextBlock Text="{Binding FilesFound, Mode=OneWay, StringFormat=N0}" FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" Margin="0,5,0,0"/></StackPanel></Border>
+                    </UniformGrid>
+
+                    <Border Grid.Row="4" Background="{DynamicResource WarningSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="13,10" Margin="0,24,0,0" Visibility="{Binding IsCanceling, Converter={StaticResource BoolToVisibilityConverter}}" AutomationProperties.LiveSetting="Assertive">
+                        <StackPanel Orientation="Horizontal"><Path Data="{StaticResource IconInfo}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource WarningBrush}" Width="17" Height="17"/><TextBlock Text="{Binding Phase, Mode=OneWay}" Foreground="{DynamicResource WarningBrush}" Margin="9,0,0,0" TextWrapping="Wrap"/></StackPanel>
                     </Border>
-                    <TextBlock Text="{Binding DataContext.Localization[Progress.Title], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource PageTitleStyle}" HorizontalAlignment="Center" Margin="0,18,0,0" />
-                    <TextBlock HorizontalAlignment="Center" Margin="0,6,0,0" TextAlignment="Center" TextWrapping="Wrap"><Run Text="{Binding SourceContext, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding ModeName, Mode=OneWay}" /></TextBlock>
-                    <Border Background="{DynamicResource InformationSubtleBrush}" CornerRadius="{StaticResource RadiusSmall}" Padding="10,5" HorizontalAlignment="Center" Margin="0,12,0,0">
-                        <TextBlock Text="{Binding DataContext.Localization[Progress.MockEstimate], RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{DynamicResource InformationBrush}" FontSize="10" />
-                    </Border>
-                </StackPanel>
 
-                <Grid Grid.Row="1" Margin="0,26,0,10"><TextBlock Text="{Binding Phase}" FontSize="14" FontWeight="SemiBold" /><TextBlock Text="{Binding Percentage, StringFormat={}{0:0}%}" HorizontalAlignment="Right" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource AccentTextBrush}" /></Grid>
-                <ProgressBar Grid.Row="2" Value="{Binding Percentage, Mode=OneWay}" Maximum="100" Height="10" />
-
-                <UniformGrid Grid.Row="3" Columns="4" Margin="0,24,0,0">
-                    <Border Style="{StaticResource SubtlePanelStyle}" Padding="12" Margin="0,0,6,0"><StackPanel><TextBlock Text="{Binding DataContext.Localization[Progress.Scanned], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource MetricLabelStyle}" TextWrapping="Wrap" /><TextBlock Text="{Binding AmountScanned}" FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap" /></StackPanel></Border>
-                    <Border Style="{StaticResource SubtlePanelStyle}" Padding="12" Margin="2,0,4,0"><StackPanel><TextBlock Text="{Binding DataContext.Localization[Progress.Elapsed], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource MetricLabelStyle}" TextWrapping="Wrap" /><TextBlock Text="{Binding ElapsedText}" FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" Margin="0,5,0,0" /></StackPanel></Border>
-                    <Border Style="{StaticResource SubtlePanelStyle}" Padding="12" Margin="4,0,2,0"><StackPanel><TextBlock Text="{Binding DataContext.Localization[Progress.Remaining], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource MetricLabelStyle}" TextWrapping="Wrap" /><TextBlock Text="{Binding RemainingText}" FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" Margin="0,5,0,0" TextWrapping="Wrap" /></StackPanel></Border>
-                    <Border Style="{StaticResource SubtlePanelStyle}" Padding="12" Margin="6,0,0,0"><StackPanel><TextBlock Text="{Binding DataContext.Localization[Progress.FilesFound], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource MetricLabelStyle}" TextWrapping="Wrap" /><TextBlock Text="{Binding FilesFound, StringFormat=N0}" FontWeight="SemiBold" FontFamily="Cascadia Mono, Consolas" Margin="0,5,0,0" /></StackPanel></Border>
-                </UniformGrid>
-
-                <Border Grid.Row="4" Background="{DynamicResource WarningSubtleBrush}" CornerRadius="{StaticResource RadiusMedium}" Padding="13,10" Margin="0,24,0,0" Visibility="{Binding IsCanceling, Converter={StaticResource BoolToVisibilityConverter}}" AutomationProperties.LiveSetting="Assertive">
-                    <StackPanel Orientation="Horizontal"><Path Data="{StaticResource IconInfo}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource WarningBrush}" Width="17" Height="17" /><TextBlock Text="{Binding DataContext.Localization[Progress.CancelingBody], RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{DynamicResource WarningBrush}" Margin="9,0,0,0" TextWrapping="Wrap" /></StackPanel>
-                </Border>
-
-                <Button Grid.Row="5" Content="{Binding DataContext.Localization[Action.Cancel], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource DangerButtonStyle}" IsEnabled="{Binding CanCancel}" Click="Cancel_Click" HorizontalAlignment="Right" MinWidth="140" Margin="0,24,0,0" />
-            </Grid>
-        </Border>
-    </Grid>
+                    <Button Grid.Row="5" Content="{Binding DataContext.Localization[Action.Cancel], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource DangerButtonStyle}" IsEnabled="{Binding CanCancel, Mode=OneWay}" Click="Cancel_Click" HorizontalAlignment="Right" MinWidth="140" Margin="0,24,0,0" AutomationProperties.Name="{Binding DataContext.Localization[Action.Cancel], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </ScrollViewer>
 </UserControl>

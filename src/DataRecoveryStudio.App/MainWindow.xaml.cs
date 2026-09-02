@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Markup;
 using System.Windows.Interop;
@@ -13,6 +14,9 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly DispatcherTimer _deviceChangeDebounce;
     private HwndSource? _windowSource;
+    private bool _modalOpen;
+    private bool _closeAfterScan;
+    private bool _allowClose;
 
     public MainWindow(MainViewModel viewModel)
     {
@@ -32,7 +36,10 @@ public partial class MainWindow : Window
         viewModel.Localization.Service.LanguageChanged += (_, _) => ApplyLanguage(viewModel.Localization.Service.LanguageCode);
         ApplyLanguage(viewModel.Localization.Service.LanguageCode);
         SourceInitialized += OnSourceInitialized;
+        Closing += OnClosing;
         Closed += OnClosed;
+        viewModel.NavigationCancellationRequested += OnNavigationCancellationRequested;
+        viewModel.ScanTerminal += OnScanTerminal;
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -64,12 +71,79 @@ public partial class MainWindow : Window
         _deviceChangeDebounce.Stop();
         _windowSource?.RemoveHook(WindowMessageHook);
         _windowSource = null;
+        _viewModel.NavigationCancellationRequested -= OnNavigationCancellationRequested;
+        _viewModel.ScanTerminal -= OnScanTerminal;
+    }
+
+    private void OnNavigationCancellationRequested(PageKind target)
+    {
+        if (!TryShowScanCancellationConfirmation(out var confirmed)) return;
+        if (confirmed)
+        {
+            _viewModel.ConfirmNavigationAfterCancellation(target);
+        }
+
+        _viewModel.ScanProgress.EndCancellationConfirmation(confirmed);
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (_allowClose || !_viewModel.ScanProgress.IsActive) return;
+        e.Cancel = true;
+        if (!TryShowScanCancellationConfirmation(out var confirmed)) return;
+        if (confirmed)
+        {
+            _closeAfterScan = true;
+            _viewModel.ScanProgress.RequestCancellation();
+        }
+
+        _viewModel.ScanProgress.EndCancellationConfirmation(confirmed);
+    }
+
+    private void OnScanTerminal(object? sender, EventArgs e)
+    {
+        if (!_closeAfterScan) return;
+        _closeAfterScan = false;
+        _allowClose = true;
+        Dispatcher.BeginInvoke(Close);
+    }
+
+    private bool TryShowScanCancellationConfirmation(out bool confirmed)
+    {
+        confirmed = false;
+        var scan = _viewModel.ScanProgress;
+        if (_modalOpen || !scan.TryBeginCancellationConfirmation()) return false;
+        _modalOpen = true;
+        var dialog = new CancelConfirmationWindow(
+            _viewModel.Localization["Navigation.CancelTitle"],
+            _viewModel.Localization["Navigation.CancelBody"],
+            _viewModel.Localization["Action.CancelSafely"],
+            _viewModel.Localization["Action.KeepScanning"])
+        {
+            Owner = this,
+        };
+        void CloseObsoleteDialog(object? _, EventArgs __)
+        {
+            if (dialog.IsVisible) dialog.Close();
+        }
+
+        scan.CancellationConfirmationInvalidated += CloseObsoleteDialog;
+        try
+        {
+            confirmed = dialog.ShowDialog() == true;
+            return true;
+        }
+        finally
+        {
+            scan.CancellationConfirmationInvalidated -= CloseObsoleteDialog;
+            _modalOpen = false;
+        }
     }
 
     public void ShowRecoveryDestinationDialog()
     {
         var session = _viewModel.Results.Session;
-        if (session is null || _viewModel.Results.SelectedCount == 0)
+        if (session is null || _viewModel.Results.IsLiveSession || !_viewModel.Results.CanRecover)
         {
             return;
         }

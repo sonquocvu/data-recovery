@@ -22,7 +22,7 @@ public partial class ScanProgressView : UserControl
 
         var dialog = new CancelConfirmationWindow(
             main.Localization["Progress.CancelTitle"],
-            main.Localization["Progress.CancelBody"],
+            scan.CancelConfirmationBody,
             main.Localization["Action.CancelSafely"],
             main.Localization["Action.KeepScanning"])
         {

@@ -37,7 +37,23 @@ public sealed class ResultItemViewModel : ObservableObject
         StatusTone = visual.Tone;
     }
 
+    public ResultItemViewModel(LiveScanCandidateDto candidate, PhysicalDeviceId sourceDeviceId, ILocalizationService? localization = null)
+        : this(ToRecoverableFile(candidate, sourceDeviceId), localization)
+    {
+        LiveCandidate = candidate;
+        StatusLabelKey = $"LiveRecoverability.{candidate.Recoverability}";
+        StatusTone = candidate.Recoverability switch
+        {
+            CandidateRecoverability.ResidentDataAvailable => "Positive",
+            CandidateRecoverability.PossiblyRecoverable or CandidateRecoverability.ZeroLength => "Caution",
+            CandidateRecoverability.PartiallyOverwritten or CandidateRecoverability.Overwritten or CandidateRecoverability.DamagedMetadata => "Critical",
+            _ => "Neutral",
+        };
+    }
+
     public RecoverableFile File { get; }
+    public LiveScanCandidateDto? LiveCandidate { get; }
+    public bool IsLiveResult => LiveCandidate is not null;
     public string Name => File.Name;
     public string OriginalPath => File.OriginalPath;
     public string Size => ByteFormatter.Format(File.SizeBytes);
@@ -46,7 +62,15 @@ public sealed class ResultItemViewModel : ObservableObject
     public string Status => Localize(StatusLabelKey, File.Recoverability.ToString());
     public string StatusLabelKey { get; }
     public string StatusTone { get; }
-    public string PreviewDescription => Localize($"Preview.Description.{File.Category}", File.PreviewDescription);
+    public string PreviewDescription => IsLiveResult
+        ? Localize("Preview.LiveMetadataOnly", "Content preview is not enabled for live scans yet.")
+        : Localize($"Preview.Description.{File.Category}", File.PreviewDescription);
+    public string PathState => LiveCandidate is null ? string.Empty : Localize($"LivePathState.{LiveCandidate.PathState}", LiveCandidate.PathState.ToString());
+    public string LayoutWarning => LiveCandidate?.Streams.Any(stream =>
+        stream.IsCompressed || stream.IsEncrypted || stream.IsSparse || stream.Storage == NtfsDataStorage.Unknown) == true
+        ? Localize("Results.UnsupportedLayoutWarning", "This stream layout is not supported for content recovery.")
+        : string.Empty;
+    public bool HasLayoutWarning => !string.IsNullOrEmpty(LayoutWarning);
     public bool IsExcellent => File.Recoverability == RecoverabilityStatus.Excellent;
     public bool IsGood => File.Recoverability == RecoverabilityStatus.Good;
     public bool IsPoor => File.Recoverability == RecoverabilityStatus.Poor;
@@ -70,7 +94,27 @@ public sealed class ResultItemViewModel : ObservableObject
         OnPropertyChanged(nameof(Category));
         OnPropertyChanged(nameof(Modified));
         OnPropertyChanged(nameof(PreviewDescription));
+        OnPropertyChanged(nameof(PathState));
+        OnPropertyChanged(nameof(LayoutWarning));
     }
+
+    private static RecoverableFile ToRecoverableFile(LiveScanCandidateDto candidate, PhysicalDeviceId sourceDeviceId) => new(
+        candidate.CandidateId,
+        candidate.Name,
+        candidate.OriginalPath,
+        Math.Max(0, candidate.LogicalSize),
+        null,
+        candidate.Category,
+        candidate.Recoverability switch
+        {
+            CandidateRecoverability.ResidentDataAvailable => RecoverabilityStatus.Excellent,
+            CandidateRecoverability.PossiblyRecoverable or CandidateRecoverability.ZeroLength => RecoverabilityStatus.Good,
+            CandidateRecoverability.PartiallyOverwritten or CandidateRecoverability.Overwritten or CandidateRecoverability.DamagedMetadata => RecoverabilityStatus.Poor,
+            _ => RecoverabilityStatus.Unknown,
+        },
+        sourceDeviceId,
+        "Live metadata only",
+        PreviewState.Unsupported);
 }
 
 public sealed class ResultsViewModel : ObservableObject
@@ -83,6 +127,7 @@ public sealed class ResultsViewModel : ObservableObject
     private ResultItemViewModel? _selectedItem;
     private ResultsDisplayState _state = ResultsDisplayState.Empty;
     private ScanSession? _session;
+    private LiveScanUiSession? _liveSession;
     private readonly bool _isDevelopmentMode;
     private readonly ILocalizationService? _localization;
     private double _lastFilterDurationMilliseconds;
@@ -128,17 +173,37 @@ public sealed class ResultsViewModel : ObservableObject
     public RelayCommand GenerateLargeDatasetCommand { get; }
     public bool IsDevelopmentMode => _isDevelopmentMode;
     public ScanSession? Session => _session;
+    public LiveScanUiSession? LiveSession => _liveSession;
+    public bool IsLiveSession => _liveSession is not null;
+    public bool IsMockSession => !IsLiveSession;
     public int TotalCount => _allResults.Count;
     public int VisibleCount => VisibleResults.Count;
     public string VisibleCountText => string.Format(Localize("Results.ShowingCount", "Showing {0:N0} of {1:N0} files"), VisibleCount, TotalCount);
     public int SelectedCount => _allResults.Count(item => item.IsSelected);
     public long SelectedBytes => _allResults.Where(item => item.IsSelected).Sum(item => item.File.SizeBytes);
     public string SelectedSize => ByteFormatter.Format(SelectedBytes);
-    public bool CanRecover => SelectedCount > 0 && Session is not null;
+    public bool CanRecover => !IsLiveSession && SelectedCount > 0 && Session is not null;
     public bool AreAllVisibleSelected => VisibleResults.Count > 0 && VisibleResults.All(item => item.IsSelected);
-    public IReadOnlyList<RecoverableFile> SelectedFiles => _allResults.Where(item => item.IsSelected).Select(item => item.File).ToArray();
-    public bool HasScanSummary => Session?.State == ScanState.Completed;
+    public IReadOnlyList<RecoverableFile> SelectedFiles => IsLiveSession
+        ? []
+        : _allResults.Where(item => item.IsSelected).Select(item => item.File).ToArray();
+    public bool HasScanSummary => IsLiveSession || Session?.State == ScanState.Completed;
     public string ScanSummary => BuildScanSummary();
+    public string ResultSafetyNotice => IsLiveSession
+        ? Localize("Results.LiveAllocationNotice", "Allocation status is only an estimate and cannot guarantee that file contents are intact.")
+        : Localize("Results.MockEstimateNotice", "Recoverability is a mock estimate, not a recovery guarantee.");
+    public string RecoveryDisabledReason => IsLiveSession
+        ? Localize("Results.LiveRecoveryDisabled", "Live recovery is not enabled yet.")
+        : string.Empty;
+    public bool WasTruncated => _liveSession is { } live &&
+        (live.Result.Terminal.CandidateCount >= LiveScanProtocol.MaximumCandidates ||
+         live.Result.Terminal.ReasonCode?.Contains("Budget", StringComparison.OrdinalIgnoreCase) == true ||
+         live.Result.Terminal.ReasonCode?.Contains("Limit", StringComparison.OrdinalIgnoreCase) == true ||
+         live.Result.Terminal.ReasonCode?.Contains("Truncat", StringComparison.OrdinalIgnoreCase) == true);
+    public bool IsPartialLiveResult => _liveSession?.Result.Terminal.IsPartial == true;
+    public bool FileSystemChanged => _liveSession?.Result.Terminal.Status == LiveScanTerminalStatus.ChangedDuringScan ||
+        _liveSession?.Result.Terminal.Consistency == LiveScanConsistency.ChangedDuringScan;
+    public double LastIngestionDurationMilliseconds { get; private set; }
     public double LastFilterDurationMilliseconds
     {
         get => _lastFilterDurationMilliseconds;
@@ -220,8 +285,10 @@ public sealed class ResultsViewModel : ObservableObject
 
     public async Task LoadAsync(ScanSession session)
     {
+        _liveSession = null;
         _session = session;
         OnPropertyChanged(nameof(Session));
+        NotifySessionProperties();
         OnPropertyChanged(nameof(HasScanSummary));
         OnPropertyChanged(nameof(ScanSummary));
         if (session.State == ScanState.Canceled)
@@ -247,20 +314,55 @@ public sealed class ResultsViewModel : ObservableObject
         LoadFiles(results);
     }
 
+    public async Task LoadLiveAsync(LiveScanUiSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        _session = null;
+        _liveSession = session;
+        SelectedItem = null;
+        State = ResultsDisplayState.Loading;
+        NotifySessionProperties();
+
+        if (session.Result.Terminal.Status == LiveScanTerminalStatus.Canceled)
+        {
+            _allResults.Clear();
+            VisibleResults.ReplaceAll([]);
+            State = ResultsDisplayState.Canceled;
+            NotifyCounts();
+            return;
+        }
+
+        var timer = Stopwatch.StartNew();
+        ResultItemViewModel[] mapped;
+        try
+        {
+            mapped = await Task.Run(() => ValidateAndMapLiveCandidates(session)).ConfigureAwait(true);
+        }
+        catch
+        {
+            _allResults.Clear();
+            VisibleResults.ReplaceAll([]);
+            State = ResultsDisplayState.Failed;
+            NotifyCounts();
+            return;
+        }
+
+        timer.Stop();
+        LastIngestionDurationMilliseconds = timer.Elapsed.TotalMilliseconds;
+        OnPropertyChanged(nameof(LastIngestionDurationMilliseconds));
+        _allResults.Clear();
+        _allResults.AddRange(mapped);
+        SubscribeToSelectionChanges();
+        State = _allResults.Count == 0 ? ResultsDisplayState.Empty : ResultsDisplayState.Completed;
+        OnPropertyChanged(nameof(CategoryOptions));
+        ApplyFilterAndSort();
+    }
+
     public void LoadFiles(IEnumerable<RecoverableFile> files)
     {
         _allResults.Clear();
         _allResults.AddRange(files.Select(file => new ResultItemViewModel(file, _localization)));
-        foreach (var item in _allResults)
-        {
-            item.PropertyChanged += (_, args) =>
-            {
-                if (args.PropertyName == nameof(ResultItemViewModel.IsSelected))
-                {
-                    NotifyCounts();
-                }
-            };
-        }
+        SubscribeToSelectionChanges();
 
         State = _allResults.Count == 0 ? ResultsDisplayState.Empty : ResultsDisplayState.Completed;
         OnPropertyChanged(nameof(CategoryOptions));
@@ -270,13 +372,13 @@ public sealed class ResultsViewModel : ObservableObject
     public void Reset()
     {
         _session = null;
+        _liveSession = null;
         _allResults.Clear();
         VisibleResults.ReplaceAll([]);
         SelectedItem = null;
         State = ResultsDisplayState.Empty;
         OnPropertyChanged(nameof(Session));
-        OnPropertyChanged(nameof(HasScanSummary));
-        OnPropertyChanged(nameof(ScanSummary));
+        NotifySessionProperties();
         NotifyCounts();
     }
 
@@ -290,6 +392,7 @@ public sealed class ResultsViewModel : ObservableObject
         }
 
         var source = new PhysicalDeviceId("mock:physical:development:large-catalog");
+        _liveSession = null;
         _session = new ScanSession(Guid.NewGuid(), source, ScanModeKind.Deep, DateTimeOffset.UtcNow, ScanState.Completed);
         OnPropertyChanged(nameof(Session));
         OnPropertyChanged(nameof(HasScanSummary));
@@ -374,6 +477,54 @@ public sealed class ResultsViewModel : ObservableObject
         OnPropertyChanged(nameof(ScanSummary));
     }
 
+    private ResultItemViewModel[] ValidateAndMapLiveCandidates(LiveScanUiSession session)
+    {
+        var result = session.Result;
+        if (result.Candidates.Count > LiveScanProtocol.MaximumCandidates ||
+            result.Terminal.CandidateCount < 0 ||
+            result.Terminal.CandidateCount != result.Candidates.Count ||
+            result.Candidates.Any(candidate => candidate.SourceSessionId != result.SessionId ||
+                candidate.CandidateId == Guid.Empty || candidate.Name.Length > LiveScanProtocol.MaximumStringCharacters ||
+                candidate.OriginalPath.Length > LiveScanProtocol.MaximumStringCharacters) ||
+            result.Candidates.Select(candidate => candidate.CandidateId).Distinct().Count() != result.Candidates.Count)
+        {
+            throw new InvalidDataException("The live candidate catalog failed validation.");
+        }
+
+        return result.Candidates
+            .OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.MftRecordNumber)
+            .Select(candidate => new ResultItemViewModel(candidate, session.Source.Id, _localization))
+            .ToArray();
+    }
+
+    private void SubscribeToSelectionChanges()
+    {
+        foreach (var item in _allResults)
+        {
+            item.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(ResultItemViewModel.IsSelected)) NotifyCounts();
+            };
+        }
+    }
+
+    private void NotifySessionProperties()
+    {
+        OnPropertyChanged(nameof(Session));
+        OnPropertyChanged(nameof(LiveSession));
+        OnPropertyChanged(nameof(IsLiveSession));
+        OnPropertyChanged(nameof(IsMockSession));
+        OnPropertyChanged(nameof(HasScanSummary));
+        OnPropertyChanged(nameof(ScanSummary));
+        OnPropertyChanged(nameof(ResultSafetyNotice));
+        OnPropertyChanged(nameof(RecoveryDisabledReason));
+        OnPropertyChanged(nameof(WasTruncated));
+        OnPropertyChanged(nameof(IsPartialLiveResult));
+        OnPropertyChanged(nameof(FileSystemChanged));
+        OnPropertyChanged(nameof(CanRecover));
+    }
+
     private int CountForCategory(FileCategory category) => category == FileCategory.All
         ? _allResults.Count
         : _allResults.Count(item => item.File.Category == category);
@@ -392,6 +543,23 @@ public sealed class ResultsViewModel : ObservableObject
 
     private string BuildScanSummary()
     {
+        if (_liveSession is { } live)
+        {
+            var liveVolume = live.Source.Volumes.FirstOrDefault();
+            var liveStatus = Localize($"LiveStatus.{live.Result.Terminal.Status}", live.Result.Terminal.Status.ToString());
+            var truncated = WasTruncated ? Localize("Results.BudgetReached", "Safety budget reached") : Localize("Results.NotTruncated", "Not truncated");
+            return string.Format(
+                Localize("Results.LiveScanSummary", "{0} ({1}) · {2} · Standard Scan · Live/read-only · {3} · {4} · {5:N0} records · {6:N0} candidates · {7}"),
+                live.Source.DisplayName,
+                liveVolume is null ? string.Empty : DeviceDisplayFormatter.FormatMountPath(liveVolume.MountPath),
+                liveVolume?.FileSystem ?? "NTFS",
+                liveStatus,
+                FormatDuration(live.Duration),
+                live.Result.Terminal.RecordsProcessed,
+                live.Result.Terminal.CandidateCount,
+                truncated);
+        }
+
         if (Session is not { State: ScanState.Completed } session)
         {
             return string.Empty;

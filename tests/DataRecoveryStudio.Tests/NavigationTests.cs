@@ -129,7 +129,8 @@ public sealed class NavigationTests
             scan ?? new MockScanService(TimeSpan.Zero, 2),
             new MockRecoveryCatalogService(),
             new JsonSettingsStore(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "settings.json")),
-            localization);
+            localization,
+            true);
     }
 
     private sealed class RecordingScanService : IScanService
