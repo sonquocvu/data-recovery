@@ -5,6 +5,8 @@ namespace DataRecoveryStudio.Application;
 public enum ScanCapabilityKind
 {
     LiveNtfsStandardScanAvailable,
+    LiveFat32StandardScanAvailable,
+    LiveFat32StandardScanFeatureDisabled,
     LiveStandardScanFeatureDisabled,
     AdministratorPermissionRequired,
     UnsupportedFilesystem,
@@ -34,9 +36,27 @@ public static class LiveStandardScanFeatureGate
     }
 }
 
+public static class LiveFat32StandardScanFeatureGate
+{
+    public const string EnvironmentVariable = "DATA_RECOVERY_STUDIO_ENABLE_LIVE_FAT32_STANDARD_SCAN";
+
+    public static bool IsEnabled(Func<string, string?>? readEnvironmentVariable = null)
+    {
+        readEnvironmentVariable ??= Environment.GetEnvironmentVariable;
+        return string.Equals(readEnvironmentVariable(EnvironmentVariable), "1", StringComparison.Ordinal);
+    }
+}
+
 public static class ScanCapabilityEvaluator
 {
     public static ScanCapability Evaluate(StorageDevice device, bool isDevelopmentMode, bool liveStandardScanEnabled)
+        => Evaluate(device, isDevelopmentMode, liveStandardScanEnabled, false);
+
+    public static ScanCapability Evaluate(
+        StorageDevice device,
+        bool isDevelopmentMode,
+        bool liveNtfsStandardScanEnabled,
+        bool liveFat32StandardScanEnabled)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (isDevelopmentMode)
@@ -63,10 +83,11 @@ public static class ScanCapabilityEvaluator
             return Unavailable(ScanCapabilityKind.UnsupportedDeviceType, "Capability.NotMounted");
         }
 
-        if (!volume.FileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase))
+        var isNtfs = volume.FileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase);
+        var isFat32 = volume.FileSystem.Equals("FAT32", StringComparison.OrdinalIgnoreCase);
+        if (!isNtfs && !isFat32)
         {
             return Unavailable(ScanCapabilityKind.UnsupportedFilesystem,
-                volume.FileSystem.Equals("FAT32", StringComparison.OrdinalIgnoreCase) ||
                 volume.FileSystem.Equals("exFAT", StringComparison.OrdinalIgnoreCase)
                     ? "Capability.FilesystemComingLater"
                     : "Capability.UnsupportedFilesystem");
@@ -95,14 +116,19 @@ public static class ScanCapabilityEvaluator
             return Unavailable(ScanCapabilityKind.UnmappedPhysicalIdentity, "Capability.UnmappedPhysicalIdentity");
         }
 
-        if (!liveStandardScanEnabled)
+        if (isNtfs && !liveNtfsStandardScanEnabled)
         {
             return Unavailable(ScanCapabilityKind.LiveStandardScanFeatureDisabled, "Capability.LivePreviewDisabled");
         }
 
+        if (isFat32 && !liveFat32StandardScanEnabled)
+        {
+            return Unavailable(ScanCapabilityKind.LiveFat32StandardScanFeatureDisabled, "Capability.LiveFat32PreviewDisabled");
+        }
+
         return new(
-            ScanCapabilityKind.LiveNtfsStandardScanAvailable,
-            "Capability.LiveNtfsAvailable",
+            isFat32 ? ScanCapabilityKind.LiveFat32StandardScanAvailable : ScanCapabilityKind.LiveNtfsStandardScanAvailable,
+            isFat32 ? "Capability.LiveFat32Available" : "Capability.LiveNtfsAvailable",
             true,
             false,
             true,

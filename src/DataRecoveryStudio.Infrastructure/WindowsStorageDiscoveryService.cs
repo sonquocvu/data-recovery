@@ -4,7 +4,7 @@ using DataRecoveryStudio.Core;
 
 namespace DataRecoveryStudio.Infrastructure;
 
-public sealed class WindowsStorageDiscoveryService : IDeviceDiscoveryService
+public sealed class WindowsStorageDiscoveryService : IProductionDeviceDiscoveryService
 {
     private const uint StorageDeviceProperty = 0;
     private const uint StorageDeviceSeekPenaltyProperty = 7;

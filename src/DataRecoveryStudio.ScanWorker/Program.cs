@@ -11,7 +11,11 @@ internal static class Program
         {
             var arguments = ScanWorkerArguments.Parse(args);
             var validator = new WindowsVolumeOnlyLiveScanTargetValidator();
-            var executor = new LiveScanExecutor(validator, new LiveVolumeSourceFactory(), new NtfsMetadataScanner());
+            var executor = new LiveScanExecutor(
+                validator,
+                new LiveVolumeSourceFactory(),
+                new NtfsMetadataScanner(),
+                new Fat32MetadataScanner());
             return await new NamedPipeScanWorkerHost(executor).RunAsync(arguments, CancellationToken.None).ConfigureAwait(false);
         }
         catch

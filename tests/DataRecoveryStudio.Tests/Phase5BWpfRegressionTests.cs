@@ -51,14 +51,15 @@ public sealed class Phase5BWpfRegressionTests
                 main.ScanMode.StartScanCommand.Execute(null);
                 await WaitUntilAsync(() => orchestration.Progress is not null);
                 await WaitUntilAsync(() => main.ScanProgress.LiveState == LiveScanUiState.RequestingPermission);
-                orchestration.Progress!.Report(new LiveScanProgressDto(0, 0, 0, 0, LiveScanClientPhase.LaunchingWorker));
+                orchestration.Progress!.Report(NtfsProgress(LiveScanClientPhase.LaunchingWorker));
                 await WaitUntilAsync(() => main.ScanProgress.LiveState == LiveScanUiState.LaunchingWorker);
-                orchestration.Progress!.Report(new LiveScanProgressDto(0, 0, 0, 0, LiveScanClientPhase.ConnectingSecureChannel));
+                orchestration.Progress!.Report(NtfsProgress(LiveScanClientPhase.ConnectingSecureChannel));
                 await WaitUntilAsync(() => main.ScanProgress.LiveState == LiveScanUiState.ConnectingSecureChannel);
                 await RenderAsync(window);
                 Assert.Contains(FindVisualChildren<ProgressBar>(window), bar => bar.IsIndeterminate);
 
-                orchestration.Progress.Report(new LiveScanProgressDto(5_000, 10_000, 2_048, 120, "Progress.Phase.Records"));
+                orchestration.Progress.Report(new LiveScanProgressDto(5_000, 10_000, 2_048, 120, "Progress.Phase.Records")
+                { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata });
                 await WaitUntilAsync(() => main.ScanProgress.LiveState == LiveScanUiState.Scanning);
                 await RenderAsync(window);
                 Assert.Contains(FindVisualChildren<ProgressBar>(window), bar => !bar.IsIndeterminate && bar.Value == 50);
@@ -67,7 +68,8 @@ public sealed class Phase5BWpfRegressionTests
                 orchestration.Complete(new LiveScanResult(
                     orchestration.SessionId,
                     new LiveScanTerminalResultDto(LiveScanTerminalStatus.Partial, LiveScanConsistency.Partial,
-                        candidates.Length, 0, 10_000, 2_048, true, "CandidateBudget"),
+                        candidates.Length, 0, 10_000, 2_048, true, "CandidateBudget")
+                    { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata, FileSystem = "NTFS" },
                     candidates,
                     []));
                 await WaitUntilAsync(() => main.CurrentPage == PageKind.Results && main.Results.TotalCount == 10_000);
@@ -96,7 +98,8 @@ public sealed class Phase5BWpfRegressionTests
                     main.ScanProgress.RequestCancellation();
                     orchestration.Complete(new LiveScanResult(
                         orchestration.SessionId,
-                        new LiveScanTerminalResultDto(LiveScanTerminalStatus.Canceled, LiveScanConsistency.Partial, 0, 0, 0, 0, true, "TestCleanup"),
+                        new LiveScanTerminalResultDto(LiveScanTerminalStatus.Canceled, LiveScanConsistency.Partial, 0, 0, 0, 0, true, "TestCleanup")
+                        { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata, FileSystem = "NTFS" },
                         [],
                         []));
                     await WaitUntilAsync(() => !main.ScanProgress.IsActive);
@@ -156,7 +159,8 @@ public sealed class Phase5BWpfRegressionTests
         BitConverter.GetBytes(index).CopyTo(bytes, 0);
         return new LiveScanCandidateDto(new Guid(bytes), sessionId, index, 1, $"candidate-{index:00000}.dat",
             $"Recovered\\candidate-{index:00000}.dat", index * 64L, FileCategory.Unknown, true, false,
-            CandidatePathState.Complete, CandidateRecoverability.MetadataOnly, [], []);
+            CandidatePathState.Complete, CandidateRecoverability.MetadataOnly, [], [])
+        { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata, FileSystem = "NTFS" };
     }
 
     private sealed class RenderingLiveOrchestrator : ILiveScanUiOrchestrator
@@ -169,12 +173,15 @@ public sealed class Phase5BWpfRegressionTests
             IProgress<LiveScanProgressDto>? progress, CancellationToken cancellationToken)
         {
             Progress = progress;
-            progress?.Report(new LiveScanProgressDto(0, 0, 0, 0, LiveScanClientPhase.RequestingPermission));
+            progress?.Report(NtfsProgress(LiveScanClientPhase.RequestingPermission));
             return _completion.Task.WaitAsync(cancellationToken);
         }
 
         public void Complete(LiveScanResult result) => _completion.TrySetResult(result);
     }
+
+    private static LiveScanProgressDto NtfsProgress(string phase) =>
+        new(0, 0, 0, 0, phase) { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata };
 
     private sealed class SingleDeviceDiscovery(StorageDevice source) : IDeviceDiscoveryService
     {

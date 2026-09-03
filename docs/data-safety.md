@@ -1,5 +1,11 @@
 # Mandatory data-safety invariants
 
+## Controlled FAT32 validation
+
+Phase 7D hardware validation is opt-in, explicit-target, and fail-closed. The normal app remains unelevated; only the existing one-shot worker requests elevation after an operator starts a scan. Target resolution uses the current Phase 3 snapshot and rejects ambiguous, system, installation, unsupported, virtual-only, non-FAT32, unmounted, or incompletely mapped volumes. No disk is selected automatically.
+
+The live source keeps `GENERIC_READ`, `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`, `OPEN_EXISTING`, `FILE_FLAG_OVERLAPPED`, and `SafeFileHandle`. Validation adds no modifying API. Bounded before/after hashes can detect relevant metadata changes but do not provide snapshot consistency. Abnormal terminal outcomes discard any accumulated live candidates. Machine reports contain sanitized identities and hashes only and are rejected when their output directory is on the scanned volume.
+
 These invariants are release-blocking requirements, not recommendations.
 
 1. **Metadata-only discovery:** Phase 3 opens volume GUID paths (without the trailing slash) and `\\.\PhysicalDriveN` only for metadata queries. Every `CreateFileW` call uses `dwDesiredAccess = 0`, `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`, `OPEN_EXISTING`, no flags, and a null template. Handles are `SafeFileHandle` instances disposed immediately after enumeration queries.
@@ -27,7 +33,19 @@ These invariants are release-blocking requirements, not recommendations.
 23. **Read-only live handle:** the Phase 5A scan-data handle uses exactly `GENERIC_READ`, share mode 7, `OPEN_EXISTING`, and a safe handle. No worker import or command can write, lock, dismount, recover, or return arbitrary source bytes.
 24. **Authenticated bounded worker:** the parent launches one deterministic installation-relative elevated worker and communicates over a random current-user-only, nonce-authenticated, versioned, length-bounded pipe. The worker performs one session and exits.
 25. **Live best-effort only:** bootstrap geometry and MFT layout fingerprints are compared around enumeration. A change makes the result partial/changed; even an unchanged scan is not described as a snapshot.
-26. **No WPF live route:** Phase 5A headless orchestration is intentionally absent from normal WPF commands. Startup remains unelevated and opens no live scan-data handle.
+26. **Explicit gated WPF live route:** WPF can reach the worker only after an eligible Standard Scan is explicitly started under its exact environment gate. Startup remains unelevated and opens no worker or live scan-data handle.
+
+27. **Trusted FAT32 image recovery only:** Phase 7B accepts only opaque IDs retained from a completed in-process Phase 7A scan. Public requests cannot provide clusters, chains, offsets, lengths, extensions, name confidence, or allocation overrides.
+28. **Fresh FAT32 evidence:** recovery reopens the same regular image read-only, verifies canonical identity/length/timestamp/SHA-256, reruns boot/FAT/directory parsing, rereads the exact deleted slot, recomputes evidence, and derives cluster plans only after validation.
+29. **Active ownership fails closed:** root, active directory, and active regular-file FAT chains are mapped through bounded traversal without reading active payload. Incomplete/cyclic/cross-linked/disagreeing ownership blocks non-empty recovery; active cluster overlap is never recovered by default or opt-in.
+30. **No FAT32 guessing:** default recovery permits empty files and exact contiguous spans that remain wholly free. Preserved chains require explicit policy and exact validated termination. Damaged opt-in permits only a deterministic trusted contiguous span; it cannot substitute clusters, search nearby space, or invoke Deep Scan.
+31. **Shared atomic destination:** FAT32 uses the existing contained, reparse-safe, sanitized, capacity-checked, create-new, no-overwrite, atomically published and post-write verified destination infrastructure. Cleanup addresses exact operation-owned paths only.
+32. **Copy fidelity is limited evidence:** matching source-stream, writer, reread-source, and published-output SHA-256/length proves only that the selected plan was copied faithfully. It does not prove original contiguity, cluster ownership before scanning, semantic validity, or an exact original filename.
+33. **Independent FAT32 gate:** live FAT32 requires exact process environment opt-in `DATA_RECOVERY_STUDIO_ENABLE_LIVE_FAT32_STANDARD_SCAN=1`; it does not inherit the NTFS gate and neither flag is persisted.
+34. **Scanner-bound live protocol:** grant correlation, scanner kind, filesystem, nonce, canonical volume, capacity, discovery generation, physical identity set, and disk extents are bound to one in-memory session. Unknown or cross-filesystem values fail closed.
+35. **FAT32 metadata only:** the worker reuses the Phase 7A parser through the existing live read-only source. It reads active directory/FAT metadata, not deleted payload clusters, and returns no cluster, slot, FAT page, source offset, or recovery provenance.
+36. **Live FAT32 consistency:** bounded boot/backup/geometry/FAT-selection/root evidence is compared before and after. Change produces partial/changed consistency and removes optimistic allocation claims; unchanged remains best-effort, never snapshot-consistent.
+37. **Live recovery lockout:** live NTFS and FAT32 sessions cannot enable recovery or reach Phase 4C/7B. Phase 7B accepts regular image sessions only.
 
 ## Enforcement strategy
 

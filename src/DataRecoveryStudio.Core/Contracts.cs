@@ -5,6 +5,10 @@ public interface IDeviceDiscoveryService
     Task<IReadOnlyList<StorageDevice>> GetDevicesAsync(CancellationToken cancellationToken);
 }
 
+public interface IProductionDeviceDiscoveryService : IDeviceDiscoveryService
+{
+}
+
 public interface IScanService
 {
     Task<ScanSession> ScanAsync(

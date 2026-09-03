@@ -5,7 +5,7 @@ namespace DataRecoveryStudio.Core;
 
 public static class LiveScanProtocol
 {
-    public const int Version = 1;
+    public const int Version = 3;
     public const int MaximumMessageBytes = 1024 * 1024;
     public const int MaximumStringCharacters = 32 * 1024;
     public const int MaximumDiagnostics = 1_000;
@@ -14,7 +14,14 @@ public static class LiveScanProtocol
     public const int MaximumDiagnosticBatchSize = 128;
     public const int MaximumSerializerDepth = 16;
     public const int MaximumIndividualReadBytes = 1024 * 1024;
-    public const string WorkerVersion = "5A.1";
+    public const string WorkerVersion = "7D.1";
+}
+
+public enum LiveScanScannerKind
+{
+    Unknown = 0,
+    NtfsStandardMetadata = 1,
+    Fat32StandardMetadata = 2,
 }
 
 public static class CanonicalVolumeGuidPath
@@ -100,7 +107,11 @@ public sealed record LiveScanTargetGrant(
     bool IsLocal,
     bool IsSupported,
     bool IsConnected,
-    string Nonce);
+    string Nonce)
+{
+    public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.Unknown;
+    public Guid CorrelationId { get; init; }
+}
 
 public sealed record LiveScanBudgets(
     long MaximumBytesRead = 256L * 1024 * 1024,
@@ -111,7 +122,11 @@ public sealed record LiveScanBudgets(
     int MaximumDataRuns = 16_384,
     int CandidateBatchSize = 128,
     TimeSpan? MaximumDuration = null,
-    TimeSpan? MaximumIdleDuration = null)
+    TimeSpan? MaximumIdleDuration = null,
+    int MaximumFatDirectories = 100_000,
+    int MaximumFatDirectoryClusters = 250_000,
+    int MaximumFatDirectoryEntries = 1_000_000,
+    int MaximumFatEntriesInspected = 2_000_000)
 {
     public TimeSpan EffectiveMaximumDuration => MaximumDuration ?? TimeSpan.FromMinutes(10);
     public TimeSpan EffectiveMaximumIdleDuration => MaximumIdleDuration ?? TimeSpan.FromSeconds(30);
@@ -120,7 +135,8 @@ public sealed record LiveScanBudgets(
     {
         if (MaximumBytesRead <= 0 || MaximumMftRecords <= 0 || MaximumCandidates <= 0 ||
             MaximumDiagnostics <= 0 || MaximumAttributesPerRecord <= 0 || MaximumDataRuns <= 0 ||
-            CandidateBatchSize <= 0 || EffectiveMaximumDuration <= TimeSpan.Zero ||
+            CandidateBatchSize <= 0 || MaximumFatDirectories <= 0 || MaximumFatDirectoryClusters <= 0 ||
+            MaximumFatDirectoryEntries <= 0 || MaximumFatEntriesInspected <= 0 || EffectiveMaximumDuration <= TimeSpan.Zero ||
             EffectiveMaximumIdleDuration <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(LiveScanBudgets), "All live scan budgets must be positive.");
@@ -169,11 +185,20 @@ public enum LiveScanConsistency
     Partial = 3,
 }
 
-public sealed record LiveScanHandshakeHello(int ProtocolVersion, string WorkerVersion, string Nonce);
+public sealed record LiveScanHandshakeHello(int ProtocolVersion, string WorkerVersion, string Nonce)
+{
+    public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.Unknown;
+}
 
-public sealed record LiveScanHandshakeAccepted(int ProtocolVersion);
+public sealed record LiveScanHandshakeAccepted(int ProtocolVersion)
+{
+    public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.Unknown;
+}
 
-public sealed record LiveScanStartRequest(LiveScanTargetGrant Grant, LiveScanBudgets Budgets);
+public sealed record LiveScanStartRequest(LiveScanTargetGrant Grant, LiveScanBudgets Budgets)
+{
+    public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.Unknown;
+}
 
 public sealed record LiveScanCancelRequest(string ReasonCode);
 
@@ -182,7 +207,14 @@ public sealed record LiveScanProgressDto(
     long TotalRecords,
     long BytesRead,
     int CandidatesFound,
-    string Phase);
+    string Phase)
+{
+    public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.NtfsStandardMetadata;
+    public int DirectoriesExamined { get; init; }
+    public int DirectoryEntriesExamined { get; init; }
+    public int FatEntriesInspected { get; init; }
+    public bool IsBudgetLimited { get; init; }
+}
 
 public sealed record LiveScanStreamSummaryDto(
     string Name,
@@ -207,7 +239,19 @@ public sealed record LiveScanCandidateDto(
     CandidatePathState PathState,
     CandidateRecoverability Recoverability,
     IReadOnlyList<LiveScanStreamSummaryDto> Streams,
-    IReadOnlyList<string> DiagnosticCodes);
+    IReadOnlyList<string> DiagnosticCodes)
+{
+    public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.Unknown;
+    public string FileSystem { get; init; } = string.Empty;
+    public Fat32CandidateKind? Fat32Kind { get; init; }
+    public Fat32NameState? Fat32NameState { get; init; }
+    public Fat32PathState? Fat32PathState { get; init; }
+    public Fat32AllocationAssessment? Fat32Allocation { get; init; }
+    public DateTimeOffset? CreatedAt { get; init; }
+    public DateTimeOffset? LastAccessedAt { get; init; }
+    public DateTimeOffset? ModifiedAt { get; init; }
+    public byte AttributeFlags { get; init; }
+}
 
 public sealed record LiveScanCandidateBatchDto(int Sequence, IReadOnlyList<LiveScanCandidateDto> Candidates);
 
@@ -223,7 +267,33 @@ public sealed record LiveScanTerminalResultDto(
     long RecordsProcessed,
     long BytesRead,
     bool IsPartial,
-    string? ReasonCode);
+    string? ReasonCode)
+{
+    public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.Unknown;
+    public string FileSystem { get; init; } = string.Empty;
+    public int DirectoriesExamined { get; init; }
+    public int DirectoryEntriesExamined { get; init; }
+    public int FatEntriesInspected { get; init; }
+    public bool Fat32GeometryValidated { get; init; }
+    public Fat32BootRelationship Fat32BootRelationship { get; init; }
+    public bool? Fat32MirroringEnabled { get; init; }
+    public int? Fat32FatCount { get; init; }
+    public int? Fat32ActiveFatIndex { get; init; }
+    public uint? Fat32RootDirectoryCluster { get; init; }
+    public string? ConsistencyEvidenceBefore { get; init; }
+    public string? ConsistencyEvidenceAfter { get; init; }
+    public bool SourceHandleDisposed { get; init; }
+    public string? Fat32ScannerVersion { get; init; }
+    public Fat32BootRelationship? Fat32BootRelationshipAfter { get; init; }
+    public string? Fat32GeometryEvidenceBefore { get; init; }
+    public string? Fat32GeometryEvidenceAfter { get; init; }
+    public string? Fat32BootEvidenceBefore { get; init; }
+    public string? Fat32BootEvidenceAfter { get; init; }
+    public string? Fat32SelectedFatEvidenceBefore { get; init; }
+    public string? Fat32SelectedFatEvidenceAfter { get; init; }
+    public string? Fat32RootChainEvidenceBefore { get; init; }
+    public string? Fat32RootChainEvidenceAfter { get; init; }
+}
 
 public sealed record LiveScanResult(
     Guid SessionId,
@@ -240,6 +310,10 @@ public interface ILiveScanWorkerClient
         CancellationToken cancellationToken);
 }
 
+public interface IProductionLiveScanWorkerClient : ILiveScanWorkerClient
+{
+}
+
 public enum LiveScanAuthorizationError
 {
     NoCurrentDiscoverySnapshot,
@@ -251,6 +325,7 @@ public enum LiveScanAuthorizationError
     NotMounted,
     NotLocal,
     UnsupportedFileSystem,
+    FeatureDisabled,
     UnsupportedTarget,
     InvalidVolumePath,
 }

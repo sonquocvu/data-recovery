@@ -1,5 +1,11 @@
 # Architecture
 
+## Phase 7D validation boundary
+
+Phase 7D leaves the UI, orchestration, and storage-engine boundaries separate. Core owns sanitized validation records and release-readiness evaluation. Application owns explicit Phase 3 snapshot resolution, one-time grant orchestration, monotonic/cancellation observation, and manual-removal identity matching. Infrastructure owns protocol validation, isolated worker lifecycle, read-only FAT32 evidence capture, abnormal-result suppression, and diagnostics-only JSON persistence.
+
+The hardware harness calls the same worker client as the WPF workflow. It cannot open a live volume itself, substitute a mock after discovery, accept a physical-drive path, or authorize an undiscovered drive letter. Protocol 3 adds versioned FAT32 geometry, boot, selected-FAT, root-chain, lifecycle, and handle-disposal evidence without transmitting source bytes.
+
 ## Components and dependency rules
 
 | Project | Responsibility | May depend on |
@@ -8,7 +14,7 @@
 | `DataRecoveryStudio.Application` | Use-case orchestration, trusted image-scan sessions and plans, navigation, commands, view models, filtering and presentation rules | Core |
 | `DataRecoveryStudio.Infrastructure` | Windows metadata-only storage discovery, safe ordinary-file/in-memory byte sources, defensive NTFS parsing and image-only extraction, atomic destination writing, mock adapters, settings, localization, and logging | Application, Core |
 | `DataRecoveryStudio.App` | WPF composition root, views, dialogs, themes, converters, UI-only behavior | Application, Core, Infrastructure |
-| `DataRecoveryStudio.ScanWorker` | One-shot elevated Windows x64 host for authenticated, read-only live NTFS metadata scans | Core, Infrastructure |
+| `DataRecoveryStudio.ScanWorker` | One-shot elevated Windows x64 host for authenticated, read-only live NTFS or FAT32 metadata scans | Core, Infrastructure |
 | `DataRecoveryStudio.Tests` | Behavioral tests across non-UI boundaries | Core, Application, Infrastructure |
 
 Core never references WPF, storage APIs, or infrastructure. Application code receives contracts through constructors. Infrastructure implements those contracts. The App composition root creates and connects implementations; this gives dependency injection without a service-locator or runtime container dependency.
@@ -22,7 +28,7 @@ flowchart LR
   Application --> Core
   Core --> Policies[Safety policies]
   Infrastructure --> Worker[One-shot elevated scan worker]
-  Worker -. GENERIC_READ volume handle .-> Device[Authorized mounted NTFS volume]
+  Worker -. GENERIC_READ volume handle .-> Device[Authorized mounted NTFS/FAT32 volume]
 ```
 
 ## Main models and interfaces
@@ -64,11 +70,15 @@ flowchart LR
   Estimate --> Catalog[Incremental result catalog]
 ```
 
-The Phase 4B standard scanner uses isolated NTFS parsing behind `IReadOnlyRandomAccessSource`; no writable stream or native handle reaches it. It derives the MFT layout from record zero, traverses fragmented virtual extents, resolves bounded attribute-list extensions, reconstructs hard-link paths, and queries `$Bitmap` through a bounded cache. Phase 4C reuses that production parser for source/record/stream revalidation and streams supported image payload bytes to a separate validated destination. Future FAT/exFAT and deep scanners will consume the same read-only abstraction and a documented signature registry.
+The Phase 4B standard scanner uses isolated NTFS parsing behind `IReadOnlyRandomAccessSource`; no writable stream or native handle reaches it. It derives the MFT layout from record zero, traverses fragmented virtual extents, resolves bounded attribute-list extensions, reconstructs hard-link paths, and queries `$Bitmap` through a bounded cache. Phase 4C reuses that production parser for source/record/stream revalidation and streams supported image payload bytes to a separate validated destination. Phase 7A/7B use the same ordinary-file-only abstraction for FAT32 metadata and selected payload clusters; exFAT remains unimplemented.
 
 ## Phase 4C image-recovery pipeline
 
 Completed image scan → retain opaque session/candidate provenance → build a no-run-list plan → validate destination → reopen the ordinary image read-only → rescan and re-resolve current NTFS metadata → stream supported resident/non-resident bytes through a create-new partial → flush and move without overwrite → hash the published file → return immutable per-file and batch outcomes. Failures and cancellation remove partial/unverified files; normal WPF routes cannot invoke this pipeline.
+
+## Phase 7B FAT32 image-recovery pipeline
+
+Completed Phase 7A image scan -> retain internal exact-slot provenance behind opaque session/candidate IDs -> build a cluster-free public plan -> validate the shared destination -> reopen and fingerprint the ordinary image read-only -> rerun production FAT32 metadata parsing -> build bounded active file/directory ownership -> derive a fresh zero-length, contiguous-free, preserved-chain, or explicitly damaged deterministic plan -> stream exact logical bytes through the shared create-new/atomic publication path -> reread selected source bytes and published output for SHA-256/length verification -> return immutable warning-aware outcomes. WPF and the live worker have no Phase 7B composition.
 
 ## Cancellation, progress, and errors
 
@@ -78,4 +88,4 @@ Expected media failures are typed, recoverable records associated with offsets. 
 
 ## Raw-device isolation and privilege
 
-Phase 5A isolates live volume access in a one-shot elevated worker. The parent grants only a current discovered mounted NTFS volume, creates a random current-user-only named pipe, authenticates the worker with a per-session nonce, and accepts bounded normalized metadata only. The live handle is `GENERIC_READ`, share mode 7, `OPEN_EXISTING`; no physical-disk or arbitrary-offset command exists. The WPF process remains `asInvoker`, and its normal scan command is not connected to this headless service. See `phase-5a-live-ntfs-scan.md`.
+Phase 5A/7C isolate live volume access in a one-shot elevated worker. The parent grants only a current discovered eligible mounted NTFS or independently gated FAT32 volume, creates a random current-user-only named pipe, authenticates the worker with a per-session nonce, and accepts bounded normalized metadata only. Scanner kind and filesystem are bound end to end. The live handle is `GENERIC_READ`, share mode 7, `OPEN_EXISTING`, and overlapped; no physical-disk scan or arbitrary-offset command exists. WPF remains `asInvoker`, launches only after an enabled Standard Scan is explicitly started, and cannot invoke live recovery. See `phase-5a-live-ntfs-scan.md` and `phase-7c-live-fat32-standard-scan.md`.

@@ -6,11 +6,21 @@ using DataRecoveryStudio.Core;
 
 namespace DataRecoveryStudio.Infrastructure;
 
-public sealed record ScanWorkerArguments(string PipeName, Guid SessionId, string Nonce, int ProtocolVersion)
+public sealed record ScanWorkerArguments(
+    string PipeName,
+    Guid SessionId,
+    string Nonce,
+    int ProtocolVersion,
+    LiveScanScannerKind ScannerKind)
 {
+    public ScanWorkerArguments(string pipeName, Guid sessionId, string nonce, int protocolVersion)
+        : this(pipeName, sessionId, nonce, protocolVersion, LiveScanScannerKind.NtfsStandardMetadata)
+    {
+    }
+
     public static ScanWorkerArguments Parse(IReadOnlyList<string> arguments)
     {
-        if (arguments.Count != 8) throw new ArgumentException("The worker requires exactly four named arguments.");
+        if (arguments.Count != 10) throw new ArgumentException("The worker requires exactly five named arguments.");
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 0; index < arguments.Count; index += 2)
         {
@@ -21,17 +31,20 @@ public sealed record ScanWorkerArguments(string PipeName, Guid SessionId, string
             !values.TryGetValue("--session", out var sessionText) ||
             !values.TryGetValue("--nonce", out var nonce) ||
             !values.TryGetValue("--protocol", out var protocolText) ||
-            values.Count != 4 ||
+            !values.TryGetValue("--scanner", out var scannerText) ||
+            values.Count != 5 ||
             pipe.Length > 128 || !pipe.StartsWith("DataRecoveryStudio.LiveScan.", StringComparison.Ordinal) ||
             pipe.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '.') ||
             !Guid.TryParseExact(sessionText, "D", out var session) || session == Guid.Empty ||
             nonce.Length != 64 || nonce.Any(character => !Uri.IsHexDigit(character)) ||
-            !int.TryParse(protocolText, System.Globalization.CultureInfo.InvariantCulture, out var protocol))
+            !int.TryParse(protocolText, System.Globalization.CultureInfo.InvariantCulture, out var protocol) ||
+            !Enum.TryParse<LiveScanScannerKind>(scannerText, ignoreCase: false, out var scannerKind) ||
+            scannerKind is not (LiveScanScannerKind.NtfsStandardMetadata or LiveScanScannerKind.Fat32StandardMetadata))
         {
             throw new ArgumentException("The worker arguments are malformed.");
         }
 
-        return new(pipe, session, nonce.ToUpperInvariant(), protocol);
+        return new(pipe, session, nonce.ToUpperInvariant(), protocol, scannerKind);
     }
 }
 
@@ -55,12 +68,16 @@ public sealed class NamedPipeScanWorkerHost(ILiveScanExecutor executor)
                 pipe,
                 arguments.SessionId,
                 LiveScanMessageKind.HandshakeHello,
-                new LiveScanHandshakeHello(LiveScanProtocol.Version, LiveScanProtocol.WorkerVersion, arguments.Nonce),
+                new LiveScanHandshakeHello(LiveScanProtocol.Version, LiveScanProtocol.WorkerVersion, arguments.Nonce)
+                {
+                    ScannerKind = arguments.ScannerKind,
+                },
                 connectionTimeout.Token).ConfigureAwait(false);
             var acceptedEnvelope = await LiveScanProtocolCodec.ReadAsync(pipe, connectionTimeout.Token).ConfigureAwait(false);
+            var accepted = LiveScanProtocolCodec.ReadPayload<LiveScanHandshakeAccepted>(acceptedEnvelope);
             if (acceptedEnvelope.SessionId != arguments.SessionId || acceptedEnvelope.Kind != LiveScanMessageKind.HandshakeAccepted ||
                 acceptedEnvelope.ProtocolVersion != LiveScanProtocol.Version ||
-                LiveScanProtocolCodec.ReadPayload<LiveScanHandshakeAccepted>(acceptedEnvelope).ProtocolVersion != LiveScanProtocol.Version)
+                accepted.ProtocolVersion != LiveScanProtocol.Version || accepted.ScannerKind != arguments.ScannerKind)
             {
                 throw new LiveScanProtocolException("The parent did not accept the authenticated handshake.");
             }
@@ -114,55 +131,69 @@ public sealed class NamedPipeScanWorkerHost(ILiveScanExecutor executor)
                 budgets,
                 new ChannelProgress(progressChannel.Writer),
                 scanCancellation.Token).ConfigureAwait(false);
+            execution = execution with
+            {
+                Terminal = execution.Terminal with { SourceHandleDisposed = true },
+            };
         }
         catch (OperationCanceledException)
         {
             var status = Volatile.Read(ref cancelReceived) != 0 || outerCancellation.IsCancellationRequested
                 ? LiveScanTerminalStatus.Canceled
                 : LiveScanTerminalStatus.TimedOut;
-            execution = Failure(status, status == LiveScanTerminalStatus.Canceled ? "Canceled" : "WorkerDurationLimit");
+            execution = Failure(start.ScannerKind, status, status == LiveScanTerminalStatus.Canceled ? "Canceled" : "WorkerDurationLimit");
         }
         catch (LiveScanTargetValidationException exception)
         {
-            execution = Failure(exception.Status, exception.ReasonCode);
+            execution = Failure(start.ScannerKind, exception.Status, exception.ReasonCode);
         }
         catch (LiveSourceRemovedException)
         {
-            execution = Failure(LiveScanTerminalStatus.SourceRemoved, "SourceRemoved");
+            execution = Failure(start.ScannerKind, LiveScanTerminalStatus.SourceRemoved, "SourceRemoved");
         }
         catch (UnauthorizedAccessException)
         {
-            execution = Failure(LiveScanTerminalStatus.AccessDenied, "AccessDenied");
+            execution = Failure(start.ScannerKind, LiveScanTerminalStatus.AccessDenied, "AccessDenied");
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == 5)
         {
-            execution = Failure(LiveScanTerminalStatus.AccessDenied, "AccessDenied");
+            execution = Failure(start.ScannerKind, LiveScanTerminalStatus.AccessDenied, "AccessDenied");
         }
         catch
         {
-            execution = Failure(LiveScanTerminalStatus.Failed, "UnexpectedWorkerFailure");
+            execution = Failure(start.ScannerKind, LiveScanTerminalStatus.Failed, "UnexpectedWorkerFailure");
         }
 
         progressChannel.Writer.TryComplete();
         try
         {
             await progressWriter.ConfigureAwait(false);
+            if (execution.Terminal.Status is not (LiveScanTerminalStatus.Completed or LiveScanTerminalStatus.Partial))
+            {
+                execution = execution with
+                {
+                    Terminal = execution.Terminal with { CandidateCount = 0 },
+                    Candidates = [],
+                };
+            }
+
+            using var publicationTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var candidateSequence = 0;
             foreach (var batch in execution.Candidates.Chunk(budgets.CandidateBatchSize))
             {
                 await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.CandidateBatch,
-                    new LiveScanCandidateBatchDto(candidateSequence++, batch), scanCancellation.Token).ConfigureAwait(false);
+                    new LiveScanCandidateBatchDto(candidateSequence++, batch), publicationTimeout.Token).ConfigureAwait(false);
             }
 
             var diagnosticSequence = 0;
             foreach (var batch in execution.Diagnostics.Chunk(LiveScanProtocol.MaximumDiagnosticBatchSize))
             {
                 await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.DiagnosticBatch,
-                    new LiveScanDiagnosticBatchDto(diagnosticSequence++, batch), scanCancellation.Token).ConfigureAwait(false);
+                    new LiveScanDiagnosticBatchDto(diagnosticSequence++, batch), publicationTimeout.Token).ConfigureAwait(false);
             }
 
             await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.TerminalResult,
-                execution.Terminal, CancellationToken.None).ConfigureAwait(false);
+                execution.Terminal, publicationTimeout.Token).ConfigureAwait(false);
             return 0;
         }
         catch
@@ -223,11 +254,12 @@ public sealed class NamedPipeScanWorkerHost(ILiveScanExecutor executor)
         ArgumentNullException.ThrowIfNull(start.Budgets);
         start.Budgets.Validate();
         _ = CanonicalVolumeGuidPath.Parse(start.Grant.CanonicalVolumeGuidPath);
-        if (start.Grant.GrantId == Guid.Empty || start.Grant.DiscoveryGeneration <= 0 || start.Grant.ExpiresAt <= DateTimeOffset.UtcNow ||
+        if (start.Grant.GrantId == Guid.Empty || start.Grant.CorrelationId != arguments.SessionId || start.Grant.DiscoveryGeneration <= 0 || start.Grant.ExpiresAt <= DateTimeOffset.UtcNow ||
             start.Grant.Nonce.Length != 64 || start.Grant.PhysicalDeviceIdentities.Count is 0 or > 128 ||
             start.Grant.PhysicalDeviceIdentities.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 256) ||
             start.Grant.PhysicalDiskNumbers.Count is 0 or > 128 || start.Grant.PhysicalDiskNumbers.Any(number => number < 0) ||
-            !start.Grant.FileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase) ||
+            start.ScannerKind is not (LiveScanScannerKind.NtfsStandardMetadata or LiveScanScannerKind.Fat32StandardMetadata) || start.ScannerKind != arguments.ScannerKind || start.Grant.ScannerKind != arguments.ScannerKind ||
+            !start.Grant.FileSystem.Equals(arguments.ScannerKind == LiveScanScannerKind.NtfsStandardMetadata ? "NTFS" : "FAT32", StringComparison.OrdinalIgnoreCase) ||
             start.Grant.FileSystem.Length > 16 || start.Grant.VolumeIdentity.Length is 0 or > 256 ||
             start.Grant.DisplayMountPath.Length > 260 ||
             HasProhibitedCharacters(start.Grant.FileSystem) || HasProhibitedCharacters(start.Grant.VolumeIdentity) ||
@@ -241,8 +273,14 @@ public sealed class NamedPipeScanWorkerHost(ILiveScanExecutor executor)
     private static bool HasProhibitedCharacters(string value) =>
         value.Any(character => character == '\0' || char.IsControl(character));
 
-    private static LiveScanExecutionResult Failure(LiveScanTerminalStatus status, string reason) => new(
-        new(status, LiveScanConsistency.Partial, 0, 0, 0, 0, true, reason),
+    private static LiveScanExecutionResult Failure(LiveScanScannerKind scannerKind, LiveScanTerminalStatus status, string reason) => new(
+        new(status, LiveScanConsistency.Partial, 0, 0, 0, 0, true, reason)
+        {
+            ScannerKind = scannerKind,
+            FileSystem = scannerKind == LiveScanScannerKind.Fat32StandardMetadata ? "FAT32" : "NTFS",
+            Fat32ScannerVersion = scannerKind == LiveScanScannerKind.Fat32StandardMetadata ? Fat32ScannerVersions.MetadataPhase7A : null,
+            SourceHandleDisposed = true,
+        },
         [],
         []);
 

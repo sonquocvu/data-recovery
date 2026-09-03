@@ -14,7 +14,11 @@ public interface ILiveScanTargetGrantAuthority
     LiveScanTargetGrant ConsumeGrant(Guid grantId);
 }
 
-public sealed class LiveScanTargetGrantAuthority(TimeProvider? timeProvider = null, TimeSpan? grantLifetime = null)
+public sealed class LiveScanTargetGrantAuthority(
+    TimeProvider? timeProvider = null,
+    TimeSpan? grantLifetime = null,
+    bool ntfsEnabled = true,
+    bool fat32Enabled = false)
     : ILiveScanTargetGrantAuthority
 {
     private const int MaximumOutstandingGrants = 1024;
@@ -40,6 +44,15 @@ public sealed class LiveScanTargetGrantAuthority(TimeProvider? timeProvider = nu
     public LiveScanTargetGrant IssueGrant(StorageDevice selectedDevice)
     {
         ArgumentNullException.ThrowIfNull(selectedDevice);
+        if (selectedDevice.Volumes.Count != 1)
+            throw new LiveScanAuthorizationException(LiveScanAuthorizationError.UnsupportedTarget);
+        return IssueGrant(selectedDevice, LiveScanScannerSelector.FromFileSystem(selectedDevice.Volumes[0].FileSystem));
+    }
+
+    public LiveScanTargetGrant IssueGrant(StorageDevice selectedDevice, LiveScanScannerKind scannerKind)
+    {
+        ArgumentNullException.ThrowIfNull(selectedDevice);
+        if (!Enum.IsDefined(scannerKind)) throw new LiveScanAuthorizationException(LiveScanAuthorizationError.UnsupportedFileSystem);
         lock (_sync)
         {
             if (_generation == 0)
@@ -53,7 +66,7 @@ public sealed class LiveScanTargetGrantAuthority(TimeProvider? timeProvider = nu
                 throw new LiveScanAuthorizationException(LiveScanAuthorizationError.TargetNotInCurrentSnapshot);
             }
 
-            var volume = RequireEligibleVolume(current);
+            var volume = RequireEligibleVolume(current, scannerKind, ntfsEnabled, fat32Enabled);
             foreach (var expired in _grants.Where(item => item.Value.ExpiresAt <= _timeProvider.GetUtcNow()).Select(item => item.Key).ToArray())
             {
                 _grants.Remove(expired);
@@ -81,7 +94,7 @@ public sealed class LiveScanTargetGrantAuthority(TimeProvider? timeProvider = nu
                 _timeProvider.GetUtcNow().Add(_grantLifetime),
                 CanonicalVolumeGuidPath.Parse(volume.VolumeGuidPath),
                 SanitizeDisplayMountPath(volume.MountPath),
-                "NTFS",
+                volume.FileSystem,
                 LiveScanIdentity.CreateVolumeIdentity(volume),
                 volume.PhysicalDeviceIds.Select(identity => identity.Value).Order(StringComparer.Ordinal).ToArray(),
                 diskNumbers,
@@ -91,7 +104,11 @@ public sealed class LiveScanTargetGrantAuthority(TimeProvider? timeProvider = nu
                 IsLocal: true,
                 IsSupported: true,
                 IsConnected: true,
-                Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
+                Convert.ToHexString(RandomNumberGenerator.GetBytes(32)))
+            {
+                ScannerKind = scannerKind,
+                CorrelationId = Guid.NewGuid(),
+            };
             _grants.Add(grant.GrantId, grant);
             return grant;
         }
@@ -124,12 +141,17 @@ public sealed class LiveScanTargetGrantAuthority(TimeProvider? timeProvider = nu
                 throw new LiveScanAuthorizationException(LiveScanAuthorizationError.TargetNotInCurrentSnapshot);
             }
 
-            _ = RequireEligibleVolume(current);
+            var currentVolume = RequireEligibleVolume(current, grant.ScannerKind, ntfsEnabled, fat32Enabled);
+            if (!LiveScanIdentity.CreateVolumeIdentity(currentVolume).Equals(grant.VolumeIdentity, StringComparison.Ordinal) ||
+                !currentVolume.FileSystem.Equals(grant.FileSystem, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new LiveScanAuthorizationException(LiveScanAuthorizationError.UnsupportedFileSystem);
+            }
             return grant;
         }
     }
 
-    private static Volume RequireEligibleVolume(StorageDevice device)
+    private static Volume RequireEligibleVolume(StorageDevice device, LiveScanScannerKind scannerKind, bool ntfsEnabled, bool fat32Enabled)
     {
         if (device.ConnectionStatus != DeviceConnectionStatus.Online)
         {
@@ -147,9 +169,16 @@ public sealed class LiveScanTargetGrantAuthority(TimeProvider? timeProvider = nu
             throw new LiveScanAuthorizationException(LiveScanAuthorizationError.NotMounted);
         }
 
-        if (!volume.FileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase))
+        var expectedFileSystem = LiveScanScannerSelector.FileSystem(scannerKind);
+        if (!volume.FileSystem.Equals(expectedFileSystem, StringComparison.OrdinalIgnoreCase))
         {
             throw new LiveScanAuthorizationException(LiveScanAuthorizationError.UnsupportedFileSystem);
+        }
+
+        if (scannerKind == LiveScanScannerKind.NtfsStandardMetadata && !ntfsEnabled ||
+            scannerKind == LiveScanScannerKind.Fat32StandardMetadata && !fat32Enabled)
+        {
+            throw new LiveScanAuthorizationException(LiveScanAuthorizationError.FeatureDisabled);
         }
 
         if (!volume.IsSupported || !device.IsSupported || volume.PhysicalDeviceIds.Count == 0 || volume.CapacityBytes <= 0)
@@ -169,6 +198,23 @@ public sealed class LiveScanTargetGrantAuthority(TimeProvider? timeProvider = nu
         path.Length <= 260 && !path.Any(character => character == '\0' || char.IsControl(character))
             ? path
             : string.Empty;
+}
+
+public static class LiveScanScannerSelector
+{
+    public static LiveScanScannerKind FromFileSystem(string? fileSystem) => fileSystem?.Trim().ToUpperInvariant() switch
+    {
+        "NTFS" => LiveScanScannerKind.NtfsStandardMetadata,
+        "FAT32" => LiveScanScannerKind.Fat32StandardMetadata,
+        _ => throw new LiveScanAuthorizationException(LiveScanAuthorizationError.UnsupportedFileSystem),
+    };
+
+    public static string FileSystem(LiveScanScannerKind scannerKind) => scannerKind switch
+    {
+        LiveScanScannerKind.NtfsStandardMetadata => "NTFS",
+        LiveScanScannerKind.Fat32StandardMetadata => "FAT32",
+        _ => throw new LiveScanAuthorizationException(LiveScanAuthorizationError.UnsupportedFileSystem),
+    };
 }
 
 public sealed class HeadlessLiveStandardScanService(
@@ -212,5 +258,24 @@ public static class LiveScanOutcomeLocalization
         LiveScanTerminalStatus.Partial => "LiveScan.Partial",
         LiveScanTerminalStatus.ChangedDuringScan => "LiveScan.ChangedDuringScan",
         _ => "LiveScan.UnexpectedFailure",
+    };
+}
+
+public static class LiveFat32ValidationOutcomeLocalization
+{
+    public static string GetLocalizationKey(LiveFat32ValidationOutcome outcome) => outcome switch
+    {
+        LiveFat32ValidationOutcome.Passed => "Validation.LiveFat32.Passed",
+        LiveFat32ValidationOutcome.Failed => "Validation.LiveFat32.Failed",
+        LiveFat32ValidationOutcome.Skipped => "Validation.LiveFat32.Skipped",
+        LiveFat32ValidationOutcome.Inconclusive => "Validation.LiveFat32.Inconclusive",
+        LiveFat32ValidationOutcome.ChangedDuringScan => "Validation.LiveFat32.ChangedDuringScan",
+        LiveFat32ValidationOutcome.Canceled => "Validation.LiveFat32.Canceled",
+        LiveFat32ValidationOutcome.SourceRemoved => "Validation.LiveFat32.SourceRemoved",
+        LiveFat32ValidationOutcome.UacDenied => "Validation.LiveFat32.UacDenied",
+        LiveFat32ValidationOutcome.TimedOut => "Validation.LiveFat32.TimedOut",
+        LiveFat32ValidationOutcome.WorkerFailed => "Validation.LiveFat32.WorkerFailed",
+        LiveFat32ValidationOutcome.ProtocolRejected => "Validation.LiveFat32.ProtocolRejected",
+        _ => "Validation.LiveFat32.Failed",
     };
 }

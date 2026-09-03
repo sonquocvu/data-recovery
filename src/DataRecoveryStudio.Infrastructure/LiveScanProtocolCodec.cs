@@ -109,15 +109,22 @@ public static class LiveScanProtocolCodec
     }
 }
 
-internal sealed class LiveScanResultAccumulator(Guid sessionId, IProgress<LiveScanProgressDto>? progress)
+internal sealed class LiveScanResultAccumulator(
+    Guid sessionId,
+    IProgress<LiveScanProgressDto>? progress,
+    LiveScanScannerKind scannerKind = LiveScanScannerKind.NtfsStandardMetadata)
 {
     private readonly List<LiveScanCandidateDto> _candidates = [];
+    private readonly HashSet<Guid> _candidateIds = [];
     private readonly List<LiveScanDiagnosticDto> _diagnostics = [];
     private int _candidateSequence;
     private int _diagnosticSequence;
     private long _records;
     private long _bytes;
     private int _found;
+    private int _directories;
+    private int _directoryEntries;
+    private int _fatEntries;
     private bool _terminal;
 
     public void Accept(LiveScanMessageEnvelope envelope)
@@ -138,7 +145,12 @@ internal sealed class LiveScanResultAccumulator(Guid sessionId, IProgress<LiveSc
                     throw new LiveScanProtocolException("The candidate stream exceeded its sequence or count bound.");
                 }
 
-                foreach (var candidate in candidates.Candidates) ValidateCandidate(candidate);
+                foreach (var candidate in candidates.Candidates)
+                {
+                    ValidateCandidate(candidate);
+                    if (!_candidateIds.Add(candidate.CandidateId))
+                        throw new LiveScanProtocolException("The candidate stream contains a duplicate identity.");
+                }
                 _candidates.AddRange(candidates.Candidates);
                 break;
             case LiveScanMessageKind.DiagnosticBatch:
@@ -173,21 +185,51 @@ internal sealed class LiveScanResultAccumulator(Guid sessionId, IProgress<LiveSc
         }
 
         var terminal = LiveScanProtocolCodec.ReadPayload<LiveScanTerminalResultDto>(envelope);
-        if (!Enum.IsDefined(terminal.Status) || !Enum.IsDefined(terminal.Consistency) || terminal.CandidateCount != _candidates.Count ||
-            terminal.DiagnosticCount != _diagnostics.Count || terminal.RecordsProcessed < 0 || terminal.BytesRead < 0)
+        if (!Enum.IsDefined(terminal.Status) || !Enum.IsDefined(terminal.Consistency) || terminal.ScannerKind != scannerKind ||
+            !terminal.FileSystem.Equals(ExpectedFileSystem(scannerKind), StringComparison.OrdinalIgnoreCase) ||
+            terminal.CandidateCount != _candidates.Count || terminal.DiagnosticCount != _diagnostics.Count ||
+            terminal.RecordsProcessed < 0 || terminal.BytesRead < 0 || terminal.DirectoriesExamined < 0 ||
+            terminal.DirectoryEntriesExamined < 0 || terminal.FatEntriesInspected < 0)
         {
             throw new LiveScanProtocolException("The terminal result does not match the bounded result stream.");
         }
 
         if (terminal.ReasonCode is not null) ValidateString(terminal.ReasonCode, 128);
+        if (!Enum.IsDefined(terminal.Fat32BootRelationship) || terminal.Fat32FatCount is < 0 or > 4 ||
+            terminal.Fat32ActiveFatIndex is < 0 or > 3)
+            throw new LiveScanProtocolException("The terminal FAT32 evidence is invalid.");
+        if (terminal.ConsistencyEvidenceBefore is not null) ValidateEvidenceHash(terminal.ConsistencyEvidenceBefore);
+        if (terminal.ConsistencyEvidenceAfter is not null) ValidateEvidenceHash(terminal.ConsistencyEvidenceAfter);
+        ValidateOptionalEvidence(terminal.Fat32GeometryEvidenceBefore, terminal.Fat32GeometryEvidenceAfter);
+        ValidateOptionalEvidence(terminal.Fat32BootEvidenceBefore, terminal.Fat32BootEvidenceAfter);
+        ValidateOptionalEvidence(terminal.Fat32SelectedFatEvidenceBefore, terminal.Fat32SelectedFatEvidenceAfter);
+        ValidateOptionalEvidence(terminal.Fat32RootChainEvidenceBefore, terminal.Fat32RootChainEvidenceAfter);
+        if (terminal.Fat32BootRelationshipAfter is not null && !Enum.IsDefined(terminal.Fat32BootRelationshipAfter.Value))
+            throw new LiveScanProtocolException("The FAT32 after-scan boot relationship is invalid.");
+        if (scannerKind == LiveScanScannerKind.Fat32StandardMetadata &&
+            !string.Equals(terminal.Fat32ScannerVersion, Fat32ScannerVersions.MetadataPhase7A, StringComparison.Ordinal))
+            throw new LiveScanProtocolException("The FAT32 scanner version is invalid.");
+        if (scannerKind == LiveScanScannerKind.NtfsStandardMetadata &&
+            (terminal.Fat32GeometryValidated || terminal.Fat32BootRelationship != Fat32BootRelationship.Unknown ||
+             terminal.Fat32MirroringEnabled is not null || terminal.Fat32FatCount is not null ||
+             terminal.Fat32ActiveFatIndex is not null || terminal.Fat32RootDirectoryCluster is not null ||
+             terminal.ConsistencyEvidenceBefore is not null || terminal.ConsistencyEvidenceAfter is not null ||
+             terminal.Fat32ScannerVersion is not null || terminal.Fat32BootRelationshipAfter is not null ||
+             terminal.Fat32GeometryEvidenceBefore is not null || terminal.Fat32GeometryEvidenceAfter is not null ||
+             terminal.Fat32BootEvidenceBefore is not null || terminal.Fat32BootEvidenceAfter is not null ||
+             terminal.Fat32SelectedFatEvidenceBefore is not null || terminal.Fat32SelectedFatEvidenceAfter is not null ||
+             terminal.Fat32RootChainEvidenceBefore is not null || terminal.Fat32RootChainEvidenceAfter is not null))
+            throw new LiveScanProtocolException("An NTFS terminal contains FAT32-only evidence.");
         _terminal = true;
         return new(sessionId, terminal, _candidates.ToArray(), _diagnostics.ToArray());
     }
 
     private void ValidateProgress(LiveScanProgressDto value)
     {
-        if (value.RecordsProcessed < _records || value.BytesRead < _bytes || value.CandidatesFound < _found ||
-            value.TotalRecords < value.RecordsProcessed)
+        if (value.ScannerKind != scannerKind || value.RecordsProcessed < _records || value.BytesRead < _bytes ||
+            value.CandidatesFound < _found || value.DirectoriesExamined < _directories ||
+            value.DirectoryEntriesExamined < _directoryEntries || value.FatEntriesInspected < _fatEntries ||
+            value.TotalRecords < 0 || (value.TotalRecords > 0 && value.TotalRecords < value.RecordsProcessed))
         {
             throw new LiveScanProtocolException("Worker progress is not monotonic.");
         }
@@ -196,15 +238,34 @@ internal sealed class LiveScanResultAccumulator(Guid sessionId, IProgress<LiveSc
         _records = value.RecordsProcessed;
         _bytes = value.BytesRead;
         _found = value.CandidatesFound;
+        _directories = value.DirectoriesExamined;
+        _directoryEntries = value.DirectoryEntriesExamined;
+        _fatEntries = value.FatEntriesInspected;
     }
 
-    private static void ValidateCandidate(LiveScanCandidateDto candidate)
+    private void ValidateCandidate(LiveScanCandidateDto candidate)
     {
-        if (candidate.CandidateId == Guid.Empty || candidate.SourceSessionId == Guid.Empty || candidate.MftRecordNumber < 0 ||
+        if (candidate.CandidateId == Guid.Empty || candidate.SourceSessionId != sessionId || candidate.ScannerKind != scannerKind ||
+            !candidate.FileSystem.Equals(ExpectedFileSystem(scannerKind), StringComparison.OrdinalIgnoreCase) || candidate.MftRecordNumber < 0 ||
             candidate.LogicalSize < 0 || candidate.Streams.Count > 128 || candidate.DiagnosticCodes.Count > 128 ||
             !Enum.IsDefined(candidate.Category) || !Enum.IsDefined(candidate.PathState) || !Enum.IsDefined(candidate.Recoverability))
         {
             throw new LiveScanProtocolException("A candidate is outside the normalized result bounds.");
+        }
+
+        if (scannerKind == LiveScanScannerKind.Fat32StandardMetadata)
+        {
+            if (candidate.MftRecordNumber != 0 || candidate.SequenceNumber != 0 || candidate.Streams.Count != 0 ||
+                candidate.Fat32Kind is null || candidate.Fat32NameState is null || candidate.Fat32PathState is null || candidate.Fat32Allocation is null ||
+                !Enum.IsDefined(candidate.Fat32Kind.Value) || !Enum.IsDefined(candidate.Fat32NameState.Value) ||
+                !Enum.IsDefined(candidate.Fat32PathState.Value) || !Enum.IsDefined(candidate.Fat32Allocation.Value))
+                throw new LiveScanProtocolException("A FAT32 candidate contains missing or cross-filesystem fields.");
+        }
+        else if (candidate.Fat32Kind is not null || candidate.Fat32NameState is not null || candidate.Fat32PathState is not null ||
+                 candidate.Fat32Allocation is not null || candidate.CreatedAt is not null || candidate.LastAccessedAt is not null ||
+                 candidate.AttributeFlags != 0)
+        {
+            throw new LiveScanProtocolException("An NTFS candidate contains FAT32-only fields.");
         }
 
         ValidateString(candidate.Name, 255);
@@ -219,11 +280,30 @@ internal sealed class LiveScanResultAccumulator(Guid sessionId, IProgress<LiveSc
         foreach (var code in candidate.DiagnosticCodes) ValidateString(code, 128);
     }
 
+    private static string ExpectedFileSystem(LiveScanScannerKind value) => value switch
+    {
+        LiveScanScannerKind.NtfsStandardMetadata => "NTFS",
+        LiveScanScannerKind.Fat32StandardMetadata => "FAT32",
+        _ => throw new LiveScanProtocolException("The scanner kind is invalid."),
+    };
+
     private static void ValidateString(string value, int maximum)
     {
         if (value is null || value.Length > maximum || value.Any(character => character == '\0' || char.IsControl(character)))
         {
             throw new LiveScanProtocolException("A protocol string is invalid or exceeds its bound.");
         }
+    }
+
+    private static void ValidateEvidenceHash(string value)
+    {
+        if (value.Length != 64 || value.Any(character => !Uri.IsHexDigit(character)))
+            throw new LiveScanProtocolException("A consistency evidence hash is invalid.");
+    }
+
+    private static void ValidateOptionalEvidence(string? before, string? after)
+    {
+        if (before is not null) ValidateEvidenceHash(before);
+        if (after is not null) ValidateEvidenceHash(after);
     }
 }

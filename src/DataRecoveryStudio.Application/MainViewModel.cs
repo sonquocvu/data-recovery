@@ -17,6 +17,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _sourceRemovedDuringScan;
     private readonly bool _isDevelopmentMode;
     private readonly bool _liveStandardScanEnabled;
+    private readonly bool _liveFat32StandardScanEnabled;
     private readonly ILiveScanUiOrchestrator? _liveOrchestrator;
     private PageKind? _pendingNavigation;
 
@@ -28,13 +29,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         ILocalizationService localization,
         bool isDevelopmentMode = false,
         bool liveStandardScanEnabled = false,
-        ILiveScanUiOrchestrator? liveOrchestrator = null)
+        ILiveScanUiOrchestrator? liveOrchestrator = null,
+        bool liveFat32StandardScanEnabled = false)
     {
         _isDevelopmentMode = isDevelopmentMode;
         _liveStandardScanEnabled = liveStandardScanEnabled;
+        _liveFat32StandardScanEnabled = liveFat32StandardScanEnabled;
         _liveOrchestrator = liveOrchestrator;
         Localization = new LocalizedText(localization);
-        ScanMode = new ScanModeViewModel(() => Navigate(PageKind.Devices), BeginScan, localization, isDevelopmentMode, liveStandardScanEnabled);
+        ScanMode = new ScanModeViewModel(() => Navigate(PageKind.Devices), BeginScan, localization, isDevelopmentMode,
+            liveStandardScanEnabled, liveFat32StandardScanEnabled);
         ScanProgress = new ScanProgressViewModel(scan, ScanFinished, localization, liveOrchestrator, LiveScanFinished);
         Results = new ResultsViewModel(catalog, isDevelopmentMode, localization);
         Settings = new SettingsViewModel(settings, localization, isDevelopmentMode);
@@ -56,7 +60,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public event EventHandler? ScanTerminal;
     public bool IsDevelopmentMode => _isDevelopmentMode;
     public bool IsLiveStandardScanEnabled => _liveStandardScanEnabled;
-    public bool IsProductionFeatureDisabled => !_isDevelopmentMode && !_liveStandardScanEnabled;
+    public bool IsLiveFat32StandardScanEnabled => _liveFat32StandardScanEnabled;
+    public bool IsProductionFeatureDisabled => !_isDevelopmentMode && !_liveStandardScanEnabled && !_liveFat32StandardScanEnabled;
 
     public PageKind CurrentPage
     {

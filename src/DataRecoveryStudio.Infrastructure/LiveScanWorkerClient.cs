@@ -57,6 +57,7 @@ public sealed class TrustedScanWorkerPathResolver
 
 public interface IScanWorkerProcess : IDisposable
 {
+    int Id => 0;
     bool HasExited { get; }
     int ExitCode { get; }
     Task WaitForExitAsync(CancellationToken cancellationToken);
@@ -66,11 +67,16 @@ public interface IScanWorkerProcess : IDisposable
 public interface IScanWorkerLauncher
 {
     IScanWorkerProcess Launch(string workerPath, string pipeName, Guid sessionId, string nonce);
+    IScanWorkerProcess Launch(string workerPath, string pipeName, Guid sessionId, string nonce, LiveScanScannerKind scannerKind) =>
+        Launch(workerPath, pipeName, sessionId, nonce);
 }
 
 public sealed class ElevatedScanWorkerLauncher : IScanWorkerLauncher
 {
     public IScanWorkerProcess Launch(string workerPath, string pipeName, Guid sessionId, string nonce)
+        => Launch(workerPath, pipeName, sessionId, nonce, LiveScanScannerKind.NtfsStandardMetadata);
+
+    public IScanWorkerProcess Launch(string workerPath, string pipeName, Guid sessionId, string nonce, LiveScanScannerKind scannerKind)
     {
         var start = new ProcessStartInfo
         {
@@ -88,12 +94,15 @@ public sealed class ElevatedScanWorkerLauncher : IScanWorkerLauncher
         start.ArgumentList.Add(nonce);
         start.ArgumentList.Add("--protocol");
         start.ArgumentList.Add(LiveScanProtocol.Version.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        start.ArgumentList.Add("--scanner");
+        start.ArgumentList.Add(scannerKind.ToString());
         var process = Process.Start(start) ?? throw new InvalidOperationException("The scan worker did not start.");
         return new ScanWorkerProcess(process);
     }
 
     private sealed class ScanWorkerProcess(Process process) : IScanWorkerProcess
     {
+        public int Id => process.Id;
         public bool HasExited => process.HasExited;
         public int ExitCode => process.ExitCode;
         public Task WaitForExitAsync(CancellationToken cancellationToken) => process.WaitForExitAsync(cancellationToken);
@@ -106,7 +115,7 @@ public sealed class ElevatedScanWorkerLauncher : IScanWorkerLauncher
     }
 }
 
-public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
+public sealed class NamedPipeLiveScanWorkerClient : IProductionLiveScanWorkerClient
 {
     private readonly string _installationDirectory;
     private readonly TrustedScanWorkerPathResolver _pathResolver;
@@ -114,6 +123,7 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
     private readonly TimeSpan _connectionTimeout;
     private readonly TimeSpan _cancelGracePeriod;
     private readonly IStructuredLogger? _logger;
+    private readonly IProgress<LiveScanWorkerLifecycleEvent>? _lifecycle;
 
     public NamedPipeLiveScanWorkerClient(
         string installationDirectory,
@@ -121,7 +131,8 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
         IScanWorkerLauncher? launcher = null,
         TimeSpan? connectionTimeout = null,
         TimeSpan? cancelGracePeriod = null,
-        IStructuredLogger? logger = null)
+        IStructuredLogger? logger = null,
+        IProgress<LiveScanWorkerLifecycleEvent>? lifecycle = null)
     {
         _installationDirectory = installationDirectory;
         _pathResolver = pathResolver ?? new TrustedScanWorkerPathResolver();
@@ -129,6 +140,7 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
         _connectionTimeout = connectionTimeout ?? TimeSpan.FromSeconds(30);
         _cancelGracePeriod = cancelGracePeriod ?? TimeSpan.FromSeconds(3);
         _logger = logger;
+        _lifecycle = lifecycle;
     }
 
     public async Task<LiveScanResult> ScanAsync(
@@ -140,8 +152,12 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
         ArgumentNullException.ThrowIfNull(grant);
         ArgumentNullException.ThrowIfNull(budgets);
         budgets.Validate();
-        var sessionId = Guid.NewGuid();
-        if (cancellationToken.IsCancellationRequested) return Failure(sessionId, LiveScanTerminalStatus.Canceled, "CanceledBeforeElevation");
+        var sessionId = grant.CorrelationId;
+        if (sessionId == Guid.Empty)
+            return Failure(Guid.NewGuid(), grant.ScannerKind, LiveScanTerminalStatus.ProtocolFailure, "MissingGrantCorrelation");
+        if (grant.ScannerKind is not (LiveScanScannerKind.NtfsStandardMetadata or LiveScanScannerKind.Fat32StandardMetadata))
+            return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.ProtocolFailure, "UnknownScannerKind");
+        if (cancellationToken.IsCancellationRequested) return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.Canceled, "CanceledBeforeElevation");
 
         string workerPath;
         try
@@ -150,11 +166,11 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
         }
         catch (FileNotFoundException)
         {
-            return Failure(sessionId, LiveScanTerminalStatus.WorkerMissing, "WorkerMissing");
+            return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.WorkerMissing, "WorkerMissing");
         }
         catch
         {
-            return Failure(sessionId, LiveScanTerminalStatus.WorkerStartFailed, "WorkerPathRejected");
+            return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.WorkerStartFailed, "WorkerPathRejected");
         }
 
         var pipeName = $"DataRecoveryStudio.LiveScan.{sessionId:N}.{Convert.ToHexString(RandomNumberGenerator.GetBytes(16))}";
@@ -169,45 +185,48 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
         IScanWorkerProcess? process = null;
         try
         {
-            progress?.Report(new LiveScanProgressDto(0, 0, 0, 0, LiveScanClientPhase.RequestingPermission));
+            progress?.Report(ClientProgress(grant.ScannerKind, LiveScanClientPhase.RequestingPermission));
             try
             {
-                process = _launcher.Launch(workerPath, pipeName, sessionId, grant.Nonce);
+                ReportLifecycle(LiveScanWorkerLifecycleEventKind.LaunchRequested, sessionId);
+                process = _launcher.Launch(workerPath, pipeName, sessionId, grant.Nonce, grant.ScannerKind);
+                ReportLifecycle(LiveScanWorkerLifecycleEventKind.WorkerStarted, sessionId, process.Id);
             }
             catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
             {
-                return Failure(sessionId, LiveScanTerminalStatus.PermissionDeclined, "UacDeclined");
+                ReportLifecycle(LiveScanWorkerLifecycleEventKind.UacDenied, sessionId);
+                return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.PermissionDeclined, "UacDeclined");
             }
             catch
             {
-                return Failure(sessionId, LiveScanTerminalStatus.WorkerStartFailed, "WorkerStartFailed");
+                return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.WorkerStartFailed, "WorkerStartFailed");
             }
 
-            progress?.Report(new LiveScanProgressDto(0, 0, 0, 0, LiveScanClientPhase.LaunchingWorker));
+            progress?.Report(ClientProgress(grant.ScannerKind, LiveScanClientPhase.LaunchingWorker));
             using var overall = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             overall.CancelAfter(budgets.EffectiveMaximumDuration);
             try
             {
-                progress?.Report(new LiveScanProgressDto(0, 0, 0, 0, LiveScanClientPhase.ConnectingSecureChannel));
+                progress?.Report(ClientProgress(grant.ScannerKind, LiveScanClientPhase.ConnectingSecureChannel));
                 var connection = pipe.WaitForConnectionAsync(overall.Token);
                 var exited = process.WaitForExitAsync(overall.Token);
                 var timeout = Task.Delay(_connectionTimeout, overall.Token);
                 var completed = await Task.WhenAny(connection, exited, timeout).ConfigureAwait(false);
                 if (completed == exited)
                 {
-                    return Failure(sessionId, LiveScanTerminalStatus.WorkerCrashed, "WorkerExitedBeforeConnection");
+                    return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.WorkerCrashed, "WorkerExitedBeforeConnection");
                 }
 
                 if (completed == timeout)
                 {
-                    return Failure(sessionId, LiveScanTerminalStatus.SecureConnectionFailed, "ConnectionTimeout");
+                    return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.SecureConnectionFailed, "ConnectionTimeout");
                 }
 
                 await connection.ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                return Failure(sessionId, LiveScanTerminalStatus.Canceled, "CanceledDuringConnection");
+                return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.Canceled, "CanceledDuringConnection");
             }
 
             var helloEnvelope = await ReadWithIdleTimeoutAsync(pipe, budgets.EffectiveMaximumIdleDuration, overall.Token).ConfigureAwait(false);
@@ -215,11 +234,14 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
                 throw new LiveScanProtocolException("The worker handshake envelope is invalid.");
             var hello = LiveScanProtocolCodec.ReadPayload<LiveScanHandshakeHello>(helloEnvelope);
             if (hello.ProtocolVersion != LiveScanProtocol.Version || helloEnvelope.ProtocolVersion != LiveScanProtocol.Version)
-                return Failure(sessionId, LiveScanTerminalStatus.WorkerVersionMismatch, "ProtocolVersionMismatch");
+                return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.WorkerVersionMismatch, "ProtocolVersionMismatch");
             if (!hello.WorkerVersion.Equals(LiveScanProtocol.WorkerVersion, StringComparison.Ordinal))
-                return Failure(sessionId, LiveScanTerminalStatus.WorkerVersionMismatch, "WorkerVersionMismatch");
+                return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.WorkerVersionMismatch, "WorkerVersionMismatch");
+            if (hello.ScannerKind != grant.ScannerKind)
+                return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.ProtocolFailure, "ScannerKindMismatch");
             if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(hello.Nonce), Convert.FromHexString(grant.Nonce)))
                 throw new LiveScanProtocolException("The worker handshake nonce is invalid.");
+            ReportLifecycle(LiveScanWorkerLifecycleEventKind.HandshakeCompleted, sessionId, process.Id);
 
             if (_logger is not null)
             {
@@ -237,12 +259,14 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
             }
 
             await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.HandshakeAccepted,
-                new LiveScanHandshakeAccepted(LiveScanProtocol.Version), overall.Token).ConfigureAwait(false);
+                new LiveScanHandshakeAccepted(LiveScanProtocol.Version) { ScannerKind = grant.ScannerKind }, overall.Token).ConfigureAwait(false);
             await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.StartScan,
-                new LiveScanStartRequest(grant, budgets), overall.Token).ConfigureAwait(false);
+                new LiveScanStartRequest(grant, budgets) { ScannerKind = grant.ScannerKind }, overall.Token).ConfigureAwait(false);
 
-            progress?.Report(new LiveScanProgressDto(0, 0, 0, 0, "Progress.Phase.Metadata"));
-            var accumulator = new LiveScanResultAccumulator(sessionId, progress);
+            progress?.Report(ClientProgress(grant.ScannerKind, grant.ScannerKind == LiveScanScannerKind.Fat32StandardMetadata
+                ? "Progress.Phase.Fat32.ReadingBootSectors"
+                : "Progress.Phase.Metadata"));
+            var accumulator = new LiveScanResultAccumulator(sessionId, progress, grant.ScannerKind);
             while (true)
             {
                 LiveScanMessageEnvelope envelope;
@@ -252,64 +276,119 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    await RequestCancellationAsync(pipe, sessionId, process).ConfigureAwait(false);
-                    return Failure(sessionId, LiveScanTerminalStatus.Canceled, "Canceled");
+                    var canceled = await CompleteAfterCancellationAsync(
+                        pipe, sessionId, process, accumulator).ConfigureAwait(false);
+                    return canceled ?? Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.Canceled, "CanceledWithoutTerminal");
                 }
                 catch (OperationCanceledException)
                 {
-                    await RequestCancellationAsync(pipe, sessionId, process).ConfigureAwait(false);
-                    return Failure(sessionId, LiveScanTerminalStatus.TimedOut, "ScanTimeout");
+                    var timedOut = await CompleteAfterCancellationAsync(
+                        pipe, sessionId, process, accumulator).ConfigureAwait(false);
+                    return timedOut ?? Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.TimedOut, "ScanTimeout");
                 }
                 catch (TimeoutException)
                 {
-                    await RequestCancellationAsync(pipe, sessionId, process).ConfigureAwait(false);
-                    return Failure(sessionId, LiveScanTerminalStatus.TimedOut, "WorkerIdleTimeout");
+                    var timedOut = await CompleteAfterCancellationAsync(
+                        pipe, sessionId, process, accumulator).ConfigureAwait(false);
+                    return timedOut ?? Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.TimedOut, "WorkerIdleTimeout");
                 }
                 catch (EndOfStreamException)
                 {
-                    return Failure(sessionId, LiveScanTerminalStatus.WorkerCrashed, "WorkerDisconnected");
+                    return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.WorkerCrashed, "WorkerDisconnected");
                 }
 
                 if (envelope.SessionId != sessionId || envelope.ProtocolVersion != LiveScanProtocol.Version)
                     throw new LiveScanProtocolException("A worker message has the wrong session or protocol version.");
-                if (envelope.Kind == LiveScanMessageKind.TerminalResult) return accumulator.Complete(envelope);
+                if (envelope.Kind == LiveScanMessageKind.TerminalResult)
+                {
+                    var result = accumulator.Complete(envelope);
+                    ReportLifecycle(LiveScanWorkerLifecycleEventKind.TerminalAccepted, sessionId, process.Id);
+                    try
+                    {
+                        using var exitGrace = new CancellationTokenSource(_cancelGracePeriod);
+                        await process.WaitForExitAsync(exitGrace.Token).ConfigureAwait(false);
+                        ReportLifecycle(LiveScanWorkerLifecycleEventKind.WorkerExited, sessionId, process.Id, process.ExitCode);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    return SuppressIncompleteCandidates(result);
+                }
                 accumulator.Accept(envelope);
             }
         }
         catch (LiveScanProtocolException)
         {
-            return Failure(sessionId, LiveScanTerminalStatus.ProtocolFailure, "ProtocolViolation");
+            return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.ProtocolFailure, "ProtocolViolation");
         }
         catch (Exception) when (process is { HasExited: true })
         {
-            return Failure(sessionId, LiveScanTerminalStatus.WorkerCrashed, "WorkerCrashed");
+            return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.WorkerCrashed, "WorkerCrashed");
         }
         catch
         {
-            return Failure(sessionId, LiveScanTerminalStatus.SecureConnectionFailed, "SecureConnectionFailed");
+            return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.SecureConnectionFailed, "SecureConnectionFailed");
         }
         finally
         {
             if (process is not null)
             {
-                if (!process.HasExited) process.Kill();
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                    ReportLifecycle(LiveScanWorkerLifecycleEventKind.WorkerTerminatedAfterGracePeriod, sessionId, process.Id);
+                }
                 process.Dispose();
+                ReportLifecycle(LiveScanWorkerLifecycleEventKind.WorkerDisposed, sessionId, process.Id);
             }
         }
     }
 
-    private async Task RequestCancellationAsync(Stream pipe, Guid sessionId, IScanWorkerProcess process)
+    private async Task<LiveScanResult?> CompleteAfterCancellationAsync(
+        Stream pipe,
+        Guid sessionId,
+        IScanWorkerProcess process,
+        LiveScanResultAccumulator accumulator)
     {
         try
         {
             await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.Cancel,
                 new LiveScanCancelRequest("ParentCanceled"), CancellationToken.None).ConfigureAwait(false);
-            using var grace = new CancellationTokenSource(_cancelGracePeriod);
-            await process.WaitForExitAsync(grace.Token).ConfigureAwait(false);
         }
         catch
         {
-            if (!process.HasExited) process.Kill();
+        }
+
+        try
+        {
+            using var grace = new CancellationTokenSource(_cancelGracePeriod);
+            while (true)
+            {
+                var envelope = await ReadWithIdleTimeoutAsync(pipe, _cancelGracePeriod, grace.Token).ConfigureAwait(false);
+                if (envelope.SessionId != sessionId || envelope.ProtocolVersion != LiveScanProtocol.Version)
+                    throw new LiveScanProtocolException("A worker message has the wrong session or protocol version.");
+                if (envelope.Kind != LiveScanMessageKind.TerminalResult)
+                {
+                    accumulator.Accept(envelope);
+                    continue;
+                }
+
+                var result = accumulator.Complete(envelope);
+                ReportLifecycle(LiveScanWorkerLifecycleEventKind.TerminalAccepted, sessionId, process.Id);
+                try
+                {
+                    await process.WaitForExitAsync(grace.Token).ConfigureAwait(false);
+                    ReportLifecycle(LiveScanWorkerLifecycleEventKind.WorkerExited, sessionId, process.Id, process.ExitCode);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                return SuppressIncompleteCandidates(result);
+            }
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or TimeoutException or IOException)
+        {
+            return null;
         }
     }
 
@@ -325,9 +404,43 @@ public sealed class NamedPipeLiveScanWorkerClient : ILiveScanWorkerClient
         }
     }
 
-    private static LiveScanResult Failure(Guid sessionId, LiveScanTerminalStatus status, string reason) => new(
+    private static LiveScanResult Failure(Guid sessionId, LiveScanScannerKind scannerKind, LiveScanTerminalStatus status, string reason) => new(
         sessionId,
-        new(status, LiveScanConsistency.Partial, 0, 0, 0, 0, true, reason),
+        new(status, LiveScanConsistency.Partial, 0, 0, 0, 0, true, reason)
+        {
+            ScannerKind = scannerKind,
+            FileSystem = scannerKind == LiveScanScannerKind.Fat32StandardMetadata ? "FAT32" : "NTFS",
+        },
         [],
         []);
+
+    internal static LiveScanResult SuppressIncompleteCandidates(LiveScanResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return result.Terminal.Status is LiveScanTerminalStatus.Completed or LiveScanTerminalStatus.Partial
+            ? result
+            : result with
+            {
+                Terminal = result.Terminal with { CandidateCount = 0 },
+                Candidates = [],
+            };
+    }
+
+    private static LiveScanProgressDto ClientProgress(LiveScanScannerKind scannerKind, string phase) =>
+        new(0, 0, 0, 0, phase) { ScannerKind = scannerKind };
+
+    private void ReportLifecycle(
+        LiveScanWorkerLifecycleEventKind kind,
+        Guid correlationId,
+        int? processId = null,
+        int? exitCode = null)
+    {
+        try
+        {
+            _lifecycle?.Report(new(kind, correlationId, DateTimeOffset.UtcNow, processId, exitCode));
+        }
+        catch
+        {
+        }
+    }
 }

@@ -1,6 +1,6 @@
 # Data Recovery Studio
 
-Phase 6B foundation for a safe, modern Windows 10/11 data-recovery application. Normal Release mode performs real, metadata-only discovery of mounted Windows volumes. WPF can route an eligible NTFS Standard Scan to the isolated Phase 5A elevated worker only when the controlled-preview feature flag is explicitly enabled. Separately, production headless image-only services can detect bounded JPEG, PNG, GIF, PDF, and ZIP candidates and copy-verify eligible contiguous extents from unchanged ordinary image files. Deep Scan and carving recovery are not connected to WPF, live disks, or the elevated worker. Live content preview, live recovery, live Deep Scan, fragmented carving, and FAT/exFAT scanning remain unavailable.
+Phase 7D foundation for a safe, modern Windows 10/11 data-recovery application. Normal Release mode performs real, metadata-only discovery of mounted Windows volumes. WPF can route eligible NTFS and FAT32 Standard Scans to the isolated Phase 5A elevated worker only when their independent controlled-preview flags are explicitly enabled. Phase 7D adds an opt-in hardware-validation harness and a fail-closed release-readiness report; it does not enable FAT32 by default. Separately, production headless image-only services provide NTFS recovery, bounded JPEG/PNG/GIF/PDF/ZIP carving, FAT32 metadata scanning, and conservative FAT32 deleted-file recovery from trusted completed image sessions. Live content preview, live recovery, live Deep Scan, fragmented FAT guessing, deleted-directory recovery, and exFAT/FAT12/FAT16 support remain unavailable.
 
 ## Build
 
@@ -23,8 +23,16 @@ The Phase 6A registry, format signatures, validation rules, range strategies, bu
 
 The Phase 6B trusted-session model, candidate revalidation, contiguous carving, shared destination safety, atomic publication, SHA-256 copy verification, and limitations are documented in `docs/phase-6b-image-carving-recovery.md`.
 
+The Phase 7A FAT32 metadata parser and Phase 7B trusted FAT32 image-recovery provenance, active ownership analysis, eligibility policy, atomic publication, byte/hash proof, and limitations are documented in `docs/FAT32_STANDARD_SCAN.md` and `docs/phase-7b-fat32-image-recovery.md`.
+
+The Phase 7C independent FAT32 gate, scanner-bound worker protocol, live consistency evidence, WPF presentation, recovery lockout, and controlled integration procedure are documented in `docs/phase-7c-live-fat32-standard-scan.md`.
+
+The Phase 7D explicit target resolver, controlled hardware/cancellation boundaries, sanitized JSON evidence report, and release-readiness rules are documented in `docs/phase-7d-hardware-validation.md`.
+
 Set `DATA_RECOVERY_STUDIO_DEVELOPMENT=1` before launch only when explicit mock-device fixtures are needed. A production discovery failure is shown as an error and never falls back to mocks.
 
 Set `DATA_RECOVERY_STUDIO_ENABLE_LIVE_STANDARD_SCAN=1` only for controlled live Standard Scan validation. The flag is disabled by default and is not persisted as a setting.
+
+Set `DATA_RECOVERY_STUDIO_ENABLE_LIVE_FAT32_STANDARD_SCAN=1` only for controlled live FAT32 metadata validation. It is disabled by default, independent of the NTFS flag, and is not persisted.
 
 UI inspection and development-mode instructions are in `docs/ui-quality-assurance.md`.

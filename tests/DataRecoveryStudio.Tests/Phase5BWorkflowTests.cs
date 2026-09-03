@@ -24,7 +24,7 @@ public sealed class Phase5BWorkflowTests
     [Theory]
     [InlineData("NTFS", true, ScanCapabilityKind.LiveNtfsStandardScanAvailable, true)]
     [InlineData("NTFS", false, ScanCapabilityKind.LiveStandardScanFeatureDisabled, false)]
-    [InlineData("FAT32", true, ScanCapabilityKind.UnsupportedFilesystem, false)]
+    [InlineData("FAT32", true, ScanCapabilityKind.LiveFat32StandardScanFeatureDisabled, false)]
     [InlineData("exFAT", true, ScanCapabilityKind.UnsupportedFilesystem, false)]
     [InlineData("ReFS", true, ScanCapabilityKind.UnsupportedFilesystem, false)]
     public void CapabilityMapping_IsExplicit(string filesystem, bool flag, ScanCapabilityKind expected, bool canStart)
@@ -373,7 +373,8 @@ public sealed class Phase5BWorkflowTests
     private static LiveScanCandidateDto CreateCandidate(Guid sessionId, int index) => new(
         GuidUtility(index), sessionId, index, 1, $"deleted-{index:00000}.dat", $"Folder\\deleted-{index:00000}.dat",
         index * 100L, FileCategory.Unknown, true, false, CandidatePathState.Complete,
-        CandidateRecoverability.MetadataOnly, [], []);
+        CandidateRecoverability.MetadataOnly, [], [])
+    { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata, FileSystem = "NTFS" };
 
     private static Guid GuidUtility(int value)
     {
@@ -389,7 +390,8 @@ public sealed class Phase5BWorkflowTests
         var partial = status is LiveScanTerminalStatus.Partial or LiveScanTerminalStatus.ChangedDuringScan;
         var consistency = status == LiveScanTerminalStatus.ChangedDuringScan
             ? LiveScanConsistency.ChangedDuringScan : partial ? LiveScanConsistency.Partial : LiveScanConsistency.LiveBestEffort;
-        return new(sessionId, new(status, consistency, candidates.Count, 0, 12_345, 4_096, partial, partial ? "Budget" : null), candidates, []);
+        return new(sessionId, new LiveScanTerminalResultDto(status, consistency, candidates.Count, 0, 12_345, 4_096, partial, partial ? "Budget" : null)
+        { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata, FileSystem = "NTFS" }, candidates, []);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)
@@ -419,7 +421,8 @@ public sealed class Phase5BWorkflowTests
             IProgress<LiveScanProgressDto>? progress, CancellationToken cancellationToken)
         {
             CallCount++;
-            progress?.Report(new LiveScanProgressDto(0, 0, 0, 0, phase ?? LiveScanClientPhase.RequestingPermission));
+            progress?.Report(new LiveScanProgressDto(0, 0, 0, 0, phase ?? LiveScanClientPhase.RequestingPermission)
+            { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata });
             try
             {
                 return await _completion.Task.WaitAsync(cancellationToken);

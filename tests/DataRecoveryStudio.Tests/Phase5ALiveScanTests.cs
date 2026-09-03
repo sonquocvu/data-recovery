@@ -69,7 +69,7 @@ public sealed class Phase5ALiveScanTests
     }
 
     [Theory]
-    [InlineData("FAT32", DeviceConnectionStatus.Online, VolumeAvailability.Available, LiveScanAuthorizationError.UnsupportedFileSystem)]
+    [InlineData("FAT32", DeviceConnectionStatus.Online, VolumeAvailability.Available, LiveScanAuthorizationError.FeatureDisabled)]
     [InlineData("NTFS", DeviceConnectionStatus.Disconnected, VolumeAvailability.Available, LiveScanAuthorizationError.Disconnected)]
     [InlineData("NTFS", DeviceConnectionStatus.Online, VolumeAvailability.NoMountPoint, LiveScanAuthorizationError.NotMounted)]
     public void Grants_RejectIneligibleDiscoveryTargets(
@@ -200,7 +200,7 @@ public sealed class Phase5ALiveScanTests
         var session = Guid.NewGuid();
         await using var stream = new MemoryStream();
         await LiveScanProtocolCodec.WriteAsync(stream, session, LiveScanMessageKind.HandshakeAccepted,
-            new LiveScanHandshakeAccepted(LiveScanProtocol.Version), CancellationToken.None);
+            new LiveScanHandshakeAccepted(LiveScanProtocol.Version) { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata }, CancellationToken.None);
         stream.Position = 0;
 
         var envelope = await LiveScanProtocolCodec.ReadAsync(stream, CancellationToken.None);
@@ -229,12 +229,13 @@ public sealed class Phase5ALiveScanTests
     {
         var session = Guid.NewGuid();
         var accumulator = new LiveScanResultAccumulator(session, null);
-        accumulator.Accept(await Envelope(session, LiveScanMessageKind.Progress, new LiveScanProgressDto(2, 10, 100, 0, "scan")));
-        var regressing = await Envelope(session, LiveScanMessageKind.Progress, new LiveScanProgressDto(1, 10, 99, 0, "scan"));
+        accumulator.Accept(await Envelope(session, LiveScanMessageKind.Progress, new LiveScanProgressDto(2, 10, 100, 0, "scan") { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata }));
+        var regressing = await Envelope(session, LiveScanMessageKind.Progress, new LiveScanProgressDto(1, 10, 99, 0, "scan") { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata });
         Assert.Throws<LiveScanProtocolException>(() => accumulator.Accept(regressing));
 
         var terminal = await Envelope(session, LiveScanMessageKind.TerminalResult,
-            new LiveScanTerminalResultDto(LiveScanTerminalStatus.Completed, LiveScanConsistency.LiveBestEffort, 0, 0, 2, 100, false, null));
+            new LiveScanTerminalResultDto(LiveScanTerminalStatus.Completed, LiveScanConsistency.LiveBestEffort, 0, 0, 2, 100, false, null)
+            { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata, FileSystem = "NTFS" });
         Assert.Equal(LiveScanTerminalStatus.Completed, accumulator.Complete(terminal).Terminal.Status);
         Assert.Throws<LiveScanProtocolException>(() => accumulator.Complete(terminal));
     }
@@ -345,15 +346,15 @@ public sealed class Phase5ALiveScanTests
         var executor = new SuccessfulExecutor();
         var host = new NamedPipeScanWorkerHost(executor);
         await using var server = CreateServer(pipeName);
-        var hostTask = host.RunAsync(new ScanWorkerArguments(pipeName, session, nonce, 1), CancellationToken.None);
+        var hostTask = host.RunAsync(new ScanWorkerArguments(pipeName, session, nonce, LiveScanProtocol.Version), CancellationToken.None);
         await server.WaitForConnectionAsync();
 
         var helloEnvelope = await LiveScanProtocolCodec.ReadAsync(server, CancellationToken.None);
         var hello = LiveScanProtocolCodec.ReadPayload<LiveScanHandshakeHello>(helloEnvelope);
         Assert.Equal(nonce, hello.Nonce);
-        await LiveScanProtocolCodec.WriteAsync(server, session, LiveScanMessageKind.HandshakeAccepted, new LiveScanHandshakeAccepted(1), CancellationToken.None);
+        await LiveScanProtocolCodec.WriteAsync(server, session, LiveScanMessageKind.HandshakeAccepted, new LiveScanHandshakeAccepted(LiveScanProtocol.Version) { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata }, CancellationToken.None);
         await LiveScanProtocolCodec.WriteAsync(server, session, LiveScanMessageKind.StartScan,
-            new LiveScanStartRequest(CreateGrant(2 * 1024 * 1024), new LiveScanBudgets()), CancellationToken.None);
+            new LiveScanStartRequest(CreateGrant(2 * 1024 * 1024) with { CorrelationId = session }, new LiveScanBudgets()) { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata }, CancellationToken.None);
 
         var accumulator = new LiveScanResultAccumulator(session, null);
         LiveScanResult? result = null;
@@ -397,12 +398,12 @@ public sealed class Phase5ALiveScanTests
         var session = Guid.NewGuid();
         var pipeName = $"DataRecoveryStudio.LiveScan.{session:N}.ABC";
         await using var server = CreateServer(pipeName);
-        var hostTask = new NamedPipeScanWorkerHost(executor).RunAsync(new ScanWorkerArguments(pipeName, session, new string('A', 64), 1), CancellationToken.None);
+        var hostTask = new NamedPipeScanWorkerHost(executor).RunAsync(new ScanWorkerArguments(pipeName, session, new string('A', 64), LiveScanProtocol.Version), CancellationToken.None);
         await server.WaitForConnectionAsync();
         _ = await LiveScanProtocolCodec.ReadAsync(server, CancellationToken.None);
-        await LiveScanProtocolCodec.WriteAsync(server, session, LiveScanMessageKind.HandshakeAccepted, new LiveScanHandshakeAccepted(1), CancellationToken.None);
+        await LiveScanProtocolCodec.WriteAsync(server, session, LiveScanMessageKind.HandshakeAccepted, new LiveScanHandshakeAccepted(LiveScanProtocol.Version) { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata }, CancellationToken.None);
         await LiveScanProtocolCodec.WriteAsync(server, session, LiveScanMessageKind.StartScan,
-            new LiveScanStartRequest(CreateGrant(2 * 1024 * 1024) with { Nonce = new string('B', 64) }, new LiveScanBudgets()), CancellationToken.None);
+            new LiveScanStartRequest(CreateGrant(2 * 1024 * 1024) with { Nonce = new string('B', 64), CorrelationId = session }, new LiveScanBudgets()) { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata }, CancellationToken.None);
 
         Assert.Equal(22, await hostTask);
         Assert.Equal(0, executor.Calls);
@@ -413,7 +414,7 @@ public sealed class Phase5ALiveScanTests
     {
         var session = Guid.NewGuid();
         var nonce = new string('A', 64);
-        var parsed = ScanWorkerArguments.Parse(["--pipe", $"DataRecoveryStudio.LiveScan.{session:N}.ABC", "--session", session.ToString("D"), "--nonce", nonce, "--protocol", "1"]);
+        var parsed = ScanWorkerArguments.Parse(["--pipe", $"DataRecoveryStudio.LiveScan.{session:N}.ABC", "--session", session.ToString("D"), "--nonce", nonce, "--protocol", LiveScanProtocol.Version.ToString(), "--scanner", "NtfsStandardMetadata"]);
         Assert.Equal(session, parsed.SessionId);
         Assert.Throws<ArgumentException>(() => ScanWorkerArguments.Parse(["--pipe", "bad\\pipe", "--session", session.ToString(), "--nonce", nonce, "--protocol", "1"]));
         Assert.Throws<ArgumentException>(() => ScanWorkerArguments.Parse(["--pipe", "x", "--session", session.ToString()]));
@@ -540,7 +541,11 @@ public sealed class Phase5ALiveScanTests
 
     private static LiveScanTargetGrant CreateGrant(long capacity) => new(
         Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(1), VolumePath, "C:\\", "NTFS", "identity",
-        ["physical"], [2], capacity, 1, true, true, true, true, new string('A', 64));
+        ["physical"], [2], capacity, 1, true, true, true, true, new string('A', 64))
+    {
+        ScannerKind = LiveScanScannerKind.NtfsStandardMetadata,
+        CorrelationId = Guid.NewGuid(),
+    };
 
     private static SafeFileHandle ValidHandle() => new(new IntPtr(1234), ownsHandle: false);
 
@@ -567,12 +572,12 @@ public sealed class Phase5ALiveScanTests
         var pipeName = $"DataRecoveryStudio.LiveScan.{session:N}.ABC";
         var executor = new CancelableExecutor();
         var server = CreateServer(pipeName);
-        var hostTask = new NamedPipeScanWorkerHost(executor).RunAsync(new ScanWorkerArguments(pipeName, session, nonce, 1), CancellationToken.None);
+        var hostTask = new NamedPipeScanWorkerHost(executor).RunAsync(new ScanWorkerArguments(pipeName, session, nonce, LiveScanProtocol.Version), CancellationToken.None);
         await server.WaitForConnectionAsync();
         _ = await LiveScanProtocolCodec.ReadAsync(server, CancellationToken.None);
-        await LiveScanProtocolCodec.WriteAsync(server, session, LiveScanMessageKind.HandshakeAccepted, new LiveScanHandshakeAccepted(1), CancellationToken.None);
+        await LiveScanProtocolCodec.WriteAsync(server, session, LiveScanMessageKind.HandshakeAccepted, new LiveScanHandshakeAccepted(LiveScanProtocol.Version) { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata }, CancellationToken.None);
         await LiveScanProtocolCodec.WriteAsync(server, session, LiveScanMessageKind.StartScan,
-            new LiveScanStartRequest(CreateGrant(2 * 1024 * 1024), new LiveScanBudgets()), CancellationToken.None);
+            new LiveScanStartRequest(CreateGrant(2 * 1024 * 1024) with { CorrelationId = session }, new LiveScanBudgets()) { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata }, CancellationToken.None);
         await executor.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
         if (disconnect)
         {
@@ -743,13 +748,15 @@ public sealed class Phase5ALiveScanTests
         public Task<LiveScanExecutionResult> ExecuteAsync(Guid sessionId, LiveScanTargetGrant grant, LiveScanBudgets requestedBudgets, IProgress<LiveScanProgressDto>? progress, CancellationToken cancellationToken)
         {
             Calls++;
-            progress?.Report(new LiveScanProgressDto(1, 1, 512, 1, "complete"));
+            progress?.Report(new LiveScanProgressDto(1, 1, 512, 1, "complete") { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata });
             var candidate = new LiveScanCandidateDto(
                 Guid.NewGuid(), sessionId, 6, 2, "deleted.txt", "\\deleted.txt", 10, FileCategory.Document,
-                true, false, CandidatePathState.Complete, CandidateRecoverability.MetadataOnly, [], []);
+                true, false, CandidatePathState.Complete, CandidateRecoverability.MetadataOnly, [], [])
+            { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata, FileSystem = "NTFS" };
             var diagnostic = new LiveScanDiagnosticDto("TEST", ScanDiagnosticSeverity.Information, "test");
             return Task.FromResult(new LiveScanExecutionResult(
-                new LiveScanTerminalResultDto(LiveScanTerminalStatus.Completed, LiveScanConsistency.LiveBestEffort, 1, 1, 1, 512, false, null),
+                new LiveScanTerminalResultDto(LiveScanTerminalStatus.Completed, LiveScanConsistency.LiveBestEffort, 1, 1, 1, 512, false, null)
+                { ScannerKind = LiveScanScannerKind.NtfsStandardMetadata, FileSystem = "NTFS" },
                 [candidate],
                 [diagnostic]));
         }
