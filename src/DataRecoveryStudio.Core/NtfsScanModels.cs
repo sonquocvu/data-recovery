@@ -209,4 +209,5 @@ public sealed record StandardScanResult(
     long RecordsProcessed,
     long BytesRead,
     bool DiagnosticsTruncated,
-    string? PartialReason = null);
+    string? PartialReason = null,
+    NtfsBitmapMetadata? AllocationBitmap = null);

@@ -243,9 +243,7 @@ public sealed class NtfsImageRecoveryEngine(
 
         var basePath = destination.PrepareDirectoryAndBasePath(item, batch.Policy.OutputLayout);
         var sanitizedName = Path.GetFileName(basePath);
-        var partialPath = destination.EnsureContained(Path.Combine(
-            Path.GetDirectoryName(basePath)!,
-            $".{sanitizedName}.{Guid.NewGuid():N}.partial"));
+        var partialPath = RecoveryFilePublication.CreatePartialPath(destination, basePath, Guid.NewGuid());
         string? publishedPath = null;
         var written = 0L;
         try
@@ -294,9 +292,9 @@ public sealed class NtfsImageRecoveryEngine(
             }
 
             destination.RevalidateParent(basePath);
-            publishedPath = PublishWithoutOverwrite(partialPath, basePath, destination, batch.Policy.MaximumCollisionAttempts);
+            publishedPath = RecoveryFilePublication.PublishWithoutOverwrite(partialPath, basePath, destination, batch.Policy.MaximumCollisionAttempts);
             partialPath = string.Empty;
-            var destinationHash = await HashFileAsync(publishedPath, batch.Policy.BufferSize, cancellationToken).ConfigureAwait(false);
+            var destinationHash = (await RecoveryFilePublication.HashFileAsync(publishedPath, batch.Policy.BufferSize, stream.LogicalSize, cancellationToken).ConfigureAwait(false)).Sha256;
             var after = await metadataProvider.CaptureAsync(batch.Source.CanonicalPath, batch.Source.VolumeOffset, cancellationToken).ConfigureAwait(false);
             if (!Matches(batch.Source, after))
             {
@@ -409,48 +407,6 @@ public sealed class NtfsImageRecoveryEngine(
         return position;
     }
 
-    private static string PublishWithoutOverwrite(
-        string partialPath,
-        string basePath,
-        RecoveryDestination destination,
-        int maximumAttempts)
-    {
-        for (var attempt = 0; attempt < maximumAttempts; attempt++)
-        {
-            var candidate = destination.EnsureContained(RecoveryDestination.WithCollisionSuffix(basePath, attempt));
-            destination.RevalidateParent(candidate);
-            try
-            {
-                File.Move(partialPath, candidate, overwrite: false);
-                return candidate;
-            }
-            catch (IOException) when (File.Exists(candidate) || Directory.Exists(candidate))
-            {
-            }
-        }
-
-        throw new IOException("No safe unique output filename was available within the bounded collision limit.");
-    }
-
-    private static async Task<string> HashFileAsync(string path, int bufferSize, CancellationToken cancellationToken)
-    {
-        using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var buffer = new byte[bufferSize];
-        while (true)
-        {
-            var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                break;
-            }
-
-            hasher.AppendData(buffer.AsSpan(0, read));
-        }
-
-        return Convert.ToHexString(hasher.GetHashAndReset());
-    }
-
     private static Task<RecoveryFileOutcome> CleanupFailureAsync(
         TrustedRecoveryItem item,
         string? partialPath,
@@ -462,14 +418,9 @@ public sealed class NtfsImageRecoveryEngine(
     {
         try
         {
-            if (!string.IsNullOrEmpty(partialPath) && File.Exists(partialPath))
+            if (!RecoveryFilePublication.CleanupExact(partialPath, publishedPath, 3))
             {
-                File.Delete(partialPath);
-            }
-
-            if (!string.IsNullOrEmpty(publishedPath) && File.Exists(publishedPath))
-            {
-                File.Delete(publishedPath);
+                throw new IOException("Exact recovery cleanup did not complete.");
             }
 
             return Task.FromResult(Failure(item, requestedOutcome, code, reason, bytes));

@@ -152,6 +152,7 @@ public sealed class NtfsMetadataScanner : INtfsMetadataScanner
                 });
         }
 
+        var bitmapMetadata = FindBitmapMetadata(resolved);
         var bitmap = CreateBitmap(source, readBudget, request.Volume.VolumeOffset, volumeEnd, validGeometry, resolved, budgets, diagnostics);
         foreach (var logicalRecord in resolved.Values.Where(record => !record.Base.IsInUse).OrderBy(record => record.Base.RecordNumber))
         {
@@ -225,7 +226,7 @@ public sealed class NtfsMetadataScanner : INtfsMetadataScanner
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(recordsProcessed, recordsToScan, readBudget.BytesRead, candidates.Count, outcome == StandardScanOutcome.Completed ? "NTFS metadata scan complete" : "NTFS metadata scan partial"));
         cancellationToken.ThrowIfCancellationRequested();
-        return Result(outcome, validGeometry, bootstrap.Layout, candidates, diagnostics, recordsProcessed, readBudget.BytesRead, partialReason);
+        return Result(outcome, validGeometry, bootstrap.Layout, candidates, diagnostics, recordsProcessed, readBudget.BytesRead, partialReason, bitmapMetadata);
     }
 
     internal async Task<NtfsRecoveryRecord> ResolveRecoveryRecordAsync(
@@ -422,6 +423,21 @@ public sealed class NtfsMetadataScanner : INtfsMetadataScanner
         return new(stream, budgets.MaximumBitmapCacheBytes, diagnostics);
     }
 
+    private static NtfsBitmapMetadata? FindBitmapMetadata(IReadOnlyDictionary<long, ResolvedFileRecord> records)
+    {
+        var bitmapRecord = records.Values
+            .Where(record => record.Base.IsInUse && record.FileNames.Any(name => string.Equals(name.Name, "$Bitmap", StringComparison.Ordinal)))
+            .OrderBy(record => record.Base.RecordNumber)
+            .FirstOrDefault();
+        var stream = bitmapRecord?.DataStreams.FirstOrDefault(item => string.IsNullOrEmpty(item.Name));
+        if (stream is null || stream.Storage != NtfsDataStorage.NonResident || stream.IsSparse || stream.IsCompressed || stream.IsEncrypted)
+        {
+            return null;
+        }
+
+        return new(stream.LogicalSize, stream.InitializedSize, stream.Runs.ToArray(), stream.MetadataIsComplete);
+    }
+
     private static async Task<MftBootstrap> BootstrapMftAsync(
         IReadOnlyRandomAccessSource source,
         ScanReadBudget readBudget,
@@ -572,8 +588,8 @@ public sealed class NtfsMetadataScanner : INtfsMetadataScanner
         }
     }
 
-    private static StandardScanResult Result(StandardScanOutcome outcome, NtfsBootGeometry? geometry, NtfsMftLayout? layout, IReadOnlyList<DeletedFileCandidate> candidates, DiagnosticCollector diagnostics, long recordsProcessed, long bytesRead, string? partialReason = null) =>
-        new(outcome, geometry, layout, candidates, diagnostics.Items, recordsProcessed, bytesRead, diagnostics.WasTruncated, partialReason);
+    private static StandardScanResult Result(StandardScanOutcome outcome, NtfsBootGeometry? geometry, NtfsMftLayout? layout, IReadOnlyList<DeletedFileCandidate> candidates, DiagnosticCollector diagnostics, long recordsProcessed, long bytesRead, string? partialReason = null, NtfsBitmapMetadata? allocationBitmap = null) =>
+        new(outcome, geometry, layout, candidates, diagnostics.Items, recordsProcessed, bytesRead, diagnostics.WasTruncated, partialReason, allocationBitmap);
 
     private sealed record BootstrapRecordRead(ParsedFileRecord? Record, long? ImageOffset);
     private sealed record MftBootstrap(NtfsVirtualStream Stream, NtfsMftLayout Layout);

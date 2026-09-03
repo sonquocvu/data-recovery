@@ -112,6 +112,14 @@ internal sealed class RecoveryDestination
         return full;
     }
 
+    public string PrepareFlatBasePath(string trustedGeneratedName, string fallback)
+    {
+        var fileName = SanitizeComponent(trustedGeneratedName, fallback);
+        var full = EnsureContained(Path.Combine(Root, fileName));
+        RevalidateParent(full);
+        return full;
+    }
+
     public string EnsureContained(string path)
     {
         var full = Path.GetFullPath(path);

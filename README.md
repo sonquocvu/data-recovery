@@ -1,6 +1,6 @@
 # Data Recovery Studio
 
-Phase 5B foundation for a safe, modern Windows 10/11 data-recovery application. Normal Release mode performs real, metadata-only discovery of mounted Windows volumes. WPF can route an eligible NTFS Standard Scan to the isolated Phase 5A elevated worker only when the controlled-preview feature flag is explicitly enabled. The worker returns bounded normalized metadata only. Live content preview, live recovery, Deep Scan, and FAT/exFAT scanning remain unavailable. The main application stays unelevated; only the one-shot worker requests administrator approval when a gated scan starts.
+Phase 6B foundation for a safe, modern Windows 10/11 data-recovery application. Normal Release mode performs real, metadata-only discovery of mounted Windows volumes. WPF can route an eligible NTFS Standard Scan to the isolated Phase 5A elevated worker only when the controlled-preview feature flag is explicitly enabled. Separately, production headless image-only services can detect bounded JPEG, PNG, GIF, PDF, and ZIP candidates and copy-verify eligible contiguous extents from unchanged ordinary image files. Deep Scan and carving recovery are not connected to WPF, live disks, or the elevated worker. Live content preview, live recovery, live Deep Scan, fragmented carving, and FAT/exFAT scanning remain unavailable.
 
 ## Build
 
@@ -18,6 +18,10 @@ The Phase 4C recovery boundary, trust model, destination rules, verification sem
 The Phase 5A worker, target grants, exact native flags, IPC bounds, consistency semantics, opt-in integration test, and limitations are documented in `docs/phase-5a-live-ntfs-scan.md`.
 
 The Phase 5B feature gate, WPF state machine, cancellation/navigation policy, metadata-only results, and remaining product restrictions are documented in `docs/phase-5b-wpf-live-standard-scan.md`.
+
+The Phase 6A registry, format signatures, validation rules, range strategies, budgets, overlap policy, source fingerprint, safety boundary, and limitations are documented in `docs/phase-6a-image-deep-scan.md`.
+
+The Phase 6B trusted-session model, candidate revalidation, contiguous carving, shared destination safety, atomic publication, SHA-256 copy verification, and limitations are documented in `docs/phase-6b-image-carving-recovery.md`.
 
 Set `DATA_RECOVERY_STUDIO_DEVELOPMENT=1` before launch only when explicit mock-device fixtures are needed. A production discovery failure is shown as an error and never falls back to mocks.
 
