@@ -155,7 +155,7 @@ public sealed class NamedPipeLiveScanWorkerClient : IProductionLiveScanWorkerCli
         var sessionId = grant.CorrelationId;
         if (sessionId == Guid.Empty)
             return Failure(Guid.NewGuid(), grant.ScannerKind, LiveScanTerminalStatus.ProtocolFailure, "MissingGrantCorrelation");
-        if (grant.ScannerKind is not (LiveScanScannerKind.NtfsStandardMetadata or LiveScanScannerKind.Fat32StandardMetadata))
+        if (grant.ScannerKind is not (LiveScanScannerKind.NtfsStandardMetadata or LiveScanScannerKind.Fat32StandardMetadata or LiveScanScannerKind.ExFatStandardMetadata))
             return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.ProtocolFailure, "UnknownScannerKind");
         if (cancellationToken.IsCancellationRequested) return Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.Canceled, "CanceledBeforeElevation");
 
@@ -263,7 +263,7 @@ public sealed class NamedPipeLiveScanWorkerClient : IProductionLiveScanWorkerCli
             await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.StartScan,
                 new LiveScanStartRequest(grant, budgets) { ScannerKind = grant.ScannerKind }, overall.Token).ConfigureAwait(false);
 
-            progress?.Report(ClientProgress(grant.ScannerKind, grant.ScannerKind == LiveScanScannerKind.Fat32StandardMetadata
+            progress?.Report(ClientProgress(grant.ScannerKind, grant.ScannerKind == LiveScanScannerKind.ExFatStandardMetadata ? "LiveScan.ExFat.Boot" : grant.ScannerKind == LiveScanScannerKind.Fat32StandardMetadata
                 ? "Progress.Phase.Fat32.ReadingBootSectors"
                 : "Progress.Phase.Metadata"));
             var accumulator = new LiveScanResultAccumulator(sessionId, progress, grant.ScannerKind);
@@ -278,19 +278,19 @@ public sealed class NamedPipeLiveScanWorkerClient : IProductionLiveScanWorkerCli
                 {
                     var canceled = await CompleteAfterCancellationAsync(
                         pipe, sessionId, process, accumulator).ConfigureAwait(false);
-                    return canceled ?? Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.Canceled, "CanceledWithoutTerminal");
+                    return OverrideCanceled(canceled, sessionId, grant.ScannerKind, LiveScanTerminalStatus.Canceled, "ParentCanceled");
                 }
                 catch (OperationCanceledException)
                 {
                     var timedOut = await CompleteAfterCancellationAsync(
                         pipe, sessionId, process, accumulator).ConfigureAwait(false);
-                    return timedOut ?? Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.TimedOut, "ScanTimeout");
+                    return OverrideCanceled(timedOut, sessionId, grant.ScannerKind, LiveScanTerminalStatus.TimedOut, "ScanTimeout");
                 }
                 catch (TimeoutException)
                 {
                     var timedOut = await CompleteAfterCancellationAsync(
                         pipe, sessionId, process, accumulator).ConfigureAwait(false);
-                    return timedOut ?? Failure(sessionId, grant.ScannerKind, LiveScanTerminalStatus.TimedOut, "WorkerIdleTimeout");
+                    return OverrideCanceled(timedOut, sessionId, grant.ScannerKind, LiveScanTerminalStatus.TimedOut, "WorkerIdleTimeout");
                 }
                 catch (EndOfStreamException)
                 {
@@ -312,7 +312,9 @@ public sealed class NamedPipeLiveScanWorkerClient : IProductionLiveScanWorkerCli
                     catch (OperationCanceledException)
                     {
                     }
-                    return SuppressIncompleteCandidates(result);
+                    return cancellationToken.IsCancellationRequested
+                        ? OverrideCanceled(result, sessionId, grant.ScannerKind, LiveScanTerminalStatus.Canceled, "ParentCanceled")
+                        : SuppressIncompleteCandidates(result);
                 }
                 accumulator.Accept(envelope);
             }
@@ -343,6 +345,15 @@ public sealed class NamedPipeLiveScanWorkerClient : IProductionLiveScanWorkerCli
             }
         }
     }
+
+    private static LiveScanResult OverrideCanceled(LiveScanResult? result, Guid session, LiveScanScannerKind kind,
+        LiveScanTerminalStatus status, string reason) => result is null ? Failure(session, kind, status, reason)
+        : result with
+        {
+            Candidates = [],
+            Terminal = result.Terminal with
+            { Status = status, Consistency = LiveScanConsistency.Partial, CandidateCount = 0, IsPartial = true, ReasonCode = reason }
+        };
 
     private async Task<LiveScanResult?> CompleteAfterCancellationAsync(
         Stream pipe,
@@ -409,7 +420,7 @@ public sealed class NamedPipeLiveScanWorkerClient : IProductionLiveScanWorkerCli
         new(status, LiveScanConsistency.Partial, 0, 0, 0, 0, true, reason)
         {
             ScannerKind = scannerKind,
-            FileSystem = scannerKind == LiveScanScannerKind.Fat32StandardMetadata ? "FAT32" : "NTFS",
+            FileSystem = scannerKind == LiveScanScannerKind.ExFatStandardMetadata ? "exFAT" : scannerKind == LiveScanScannerKind.Fat32StandardMetadata ? "FAT32" : "NTFS",
         },
         [],
         []);

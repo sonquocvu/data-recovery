@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using DataRecoveryStudio.Core;
 
 namespace DataRecoveryStudio.Infrastructure;
@@ -20,6 +21,14 @@ public static class LiveScanProtocolCodec
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver
+        {
+            Modifiers = { info =>
+            {
+                if (info.Type == typeof(LiveExFatMetadata) || info.Type == typeof(LiveExFatEvidence) || info.Type == typeof(ExFatTimestamp))
+                    foreach (var property in info.Properties) property.IsRequired = true;
+            } },
+        },
         MaxDepth = LiveScanProtocol.MaximumSerializerDepth,
         PropertyNameCaseInsensitive = false,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
@@ -126,9 +135,12 @@ internal sealed class LiveScanResultAccumulator(
     private int _directoryEntries;
     private int _fatEntries;
     private bool _terminal;
+    private long _characters;
+    private long _logicalBytes;
 
     public void Accept(LiveScanMessageEnvelope envelope)
     {
+        if (envelope.ProtocolVersion != LiveScanProtocol.Version || envelope.SessionId != sessionId) throw new LiveScanProtocolException("Envelope binding mismatch.");
         if (_terminal) throw new LiveScanProtocolException("A message followed the terminal result.");
         switch (envelope.Kind)
         {
@@ -139,7 +151,7 @@ internal sealed class LiveScanResultAccumulator(
                 break;
             case LiveScanMessageKind.CandidateBatch:
                 var candidates = LiveScanProtocolCodec.ReadPayload<LiveScanCandidateBatchDto>(envelope);
-                if (candidates.Sequence != _candidateSequence++ || candidates.Candidates.Count > LiveScanProtocol.MaximumCandidateBatchSize ||
+                if (candidates.ScannerKind != scannerKind || candidates.Candidates is null || candidates.Sequence != _candidateSequence++ || candidates.Candidates.Count > LiveScanProtocol.MaximumCandidateBatchSize ||
                     _candidates.Count + candidates.Candidates.Count > LiveScanProtocol.MaximumCandidates)
                 {
                     throw new LiveScanProtocolException("The candidate stream exceeded its sequence or count bound.");
@@ -148,6 +160,10 @@ internal sealed class LiveScanResultAccumulator(
                 foreach (var candidate in candidates.Candidates)
                 {
                     ValidateCandidate(candidate);
+                    if (candidate.LogicalSize > long.MaxValue - _logicalBytes) throw new LiveScanProtocolException("Aggregate size overflow.");
+                    _logicalBytes += candidate.LogicalSize;
+                    _characters += candidate.Name.Length + candidate.OriginalPath.Length + candidate.DiagnosticCodes.Sum(c => c.Length) + candidate.Streams.Sum(s => s.Name.Length);
+                    if (_characters > 16_000_000) throw new LiveScanProtocolException("Aggregate text budget exceeded.");
                     if (!_candidateIds.Add(candidate.CandidateId))
                         throw new LiveScanProtocolException("The candidate stream contains a duplicate identity.");
                 }
@@ -155,7 +171,7 @@ internal sealed class LiveScanResultAccumulator(
                 break;
             case LiveScanMessageKind.DiagnosticBatch:
                 var diagnostics = LiveScanProtocolCodec.ReadPayload<LiveScanDiagnosticBatchDto>(envelope);
-                if (diagnostics.Sequence != _diagnosticSequence++ || diagnostics.Diagnostics.Count > LiveScanProtocol.MaximumDiagnosticBatchSize ||
+                if (diagnostics.ScannerKind != scannerKind || diagnostics.Diagnostics is null || diagnostics.Sequence != _diagnosticSequence++ || diagnostics.Diagnostics.Count > LiveScanProtocol.MaximumDiagnosticBatchSize ||
                     _diagnostics.Count + diagnostics.Diagnostics.Count > LiveScanProtocol.MaximumDiagnostics)
                 {
                     throw new LiveScanProtocolException("The diagnostic stream exceeded its sequence or count bound.");
@@ -163,6 +179,7 @@ internal sealed class LiveScanResultAccumulator(
 
                 foreach (var diagnostic in diagnostics.Diagnostics)
                 {
+                    if (diagnostic is null) throw new LiveScanProtocolException("Null diagnostic.");
                     ValidateString(diagnostic.Code, 128);
                     ValidateString(diagnostic.Operation, 128);
                     if (!Enum.IsDefined(diagnostic.Severity)) throw new LiveScanProtocolException("A diagnostic enum is invalid.");
@@ -179,14 +196,14 @@ internal sealed class LiveScanResultAccumulator(
 
     public LiveScanResult Complete(LiveScanMessageEnvelope envelope)
     {
-        if (_terminal || envelope.Kind != LiveScanMessageKind.TerminalResult)
+        if (envelope.ProtocolVersion != LiveScanProtocol.Version || envelope.SessionId != sessionId || _terminal || envelope.Kind != LiveScanMessageKind.TerminalResult)
         {
             throw new LiveScanProtocolException("Exactly one terminal result is required.");
         }
 
         var terminal = LiveScanProtocolCodec.ReadPayload<LiveScanTerminalResultDto>(envelope);
         if (!Enum.IsDefined(terminal.Status) || !Enum.IsDefined(terminal.Consistency) || terminal.ScannerKind != scannerKind ||
-            !terminal.FileSystem.Equals(ExpectedFileSystem(scannerKind), StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(terminal.FileSystem, ExpectedFileSystem(scannerKind), StringComparison.OrdinalIgnoreCase) ||
             terminal.CandidateCount != _candidates.Count || terminal.DiagnosticCount != _diagnostics.Count ||
             terminal.RecordsProcessed < 0 || terminal.BytesRead < 0 || terminal.DirectoriesExamined < 0 ||
             terminal.DirectoryEntriesExamined < 0 || terminal.FatEntriesInspected < 0)
@@ -209,23 +226,57 @@ internal sealed class LiveScanResultAccumulator(
         if (scannerKind == LiveScanScannerKind.Fat32StandardMetadata &&
             !string.Equals(terminal.Fat32ScannerVersion, Fat32ScannerVersions.MetadataPhase7A, StringComparison.Ordinal))
             throw new LiveScanProtocolException("The FAT32 scanner version is invalid.");
-        if (scannerKind == LiveScanScannerKind.NtfsStandardMetadata &&
+        if (scannerKind != LiveScanScannerKind.Fat32StandardMetadata &&
             (terminal.Fat32GeometryValidated || terminal.Fat32BootRelationship != Fat32BootRelationship.Unknown ||
              terminal.Fat32MirroringEnabled is not null || terminal.Fat32FatCount is not null ||
              terminal.Fat32ActiveFatIndex is not null || terminal.Fat32RootDirectoryCluster is not null ||
-             terminal.ConsistencyEvidenceBefore is not null || terminal.ConsistencyEvidenceAfter is not null ||
+             (scannerKind == LiveScanScannerKind.NtfsStandardMetadata && (terminal.ConsistencyEvidenceBefore is not null || terminal.ConsistencyEvidenceAfter is not null)) ||
              terminal.Fat32ScannerVersion is not null || terminal.Fat32BootRelationshipAfter is not null ||
              terminal.Fat32GeometryEvidenceBefore is not null || terminal.Fat32GeometryEvidenceAfter is not null ||
              terminal.Fat32BootEvidenceBefore is not null || terminal.Fat32BootEvidenceAfter is not null ||
              terminal.Fat32SelectedFatEvidenceBefore is not null || terminal.Fat32SelectedFatEvidenceAfter is not null ||
              terminal.Fat32RootChainEvidenceBefore is not null || terminal.Fat32RootChainEvidenceAfter is not null))
             throw new LiveScanProtocolException("An NTFS terminal contains FAT32-only evidence.");
+        if (scannerKind != LiveScanScannerKind.ExFatStandardMetadata && terminal.ExFat is not null)
+            throw new LiveScanProtocolException("Cross-filesystem exFAT evidence.");
+        if (scannerKind == LiveScanScannerKind.ExFatStandardMetadata)
+        {
+            if (terminal.BytesRead > 1024L * 1024 * 1024 || terminal.DirectoriesExamined > 100_000 ||
+                terminal.DirectoryEntriesExamined > 2_000_000 || terminal.FatEntriesInspected > 4_000_000 ||
+                terminal.RecordsProcessed != terminal.DirectoryEntriesExamined)
+                throw new LiveScanProtocolException("ExFAT terminal counters exceeded their hard bounds.");
+            if (terminal.ExFat is { } e)
+            {
+                var counts = new[] { e.BootBytes, e.FatBytes, e.BitmapBytes, e.UpCaseBytes, e.DirectoryBytes, e.ConsistencyBytes };
+                if (e.ScannerVersion != ExFatScannerVersion.Phase8A || e.SampleCount is < 0 or > 32768 ||
+                    e.SampleBytes is < 0 or > 8 * 1024 * 1024 || counts.Any(n => n < 0 || n > 1024L * 1024 * 1024) ||
+                    counts.Sum() != terminal.BytesRead || e.ConsistencyBytes > e.SampleBytes ||
+                    (e.UsedBackup && !e.BackupValid)) throw new LiveScanProtocolException("Invalid exFAT evidence.");
+                if (terminal.Status == LiveScanTerminalStatus.Completed && (!e.GeometryValidated || !e.MainValid || !e.BackupValid || e.UsedBackup || e.BudgetLimited ||
+                    terminal.IsPartial || terminal.Consistency != LiveScanConsistency.LiveBestEffort || e.SampleCount == 0 ||
+                    e.SampleBytes != e.ConsistencyBytes || terminal.ConsistencyEvidenceBefore is null ||
+                    terminal.ConsistencyEvidenceBefore != terminal.ConsistencyEvidenceAfter))
+                    throw new LiveScanProtocolException("Incomplete exFAT completion evidence.");
+            }
+            else if (terminal.Status is LiveScanTerminalStatus.Completed or LiveScanTerminalStatus.Partial)
+                throw new LiveScanProtocolException("Missing exFAT evidence.");
+            if (terminal.Status is not (LiveScanTerminalStatus.Completed or LiveScanTerminalStatus.Partial) && terminal.CandidateCount != 0)
+                throw new LiveScanProtocolException("Abnormal exFAT candidates cannot be published.");
+            if (terminal.Status == LiveScanTerminalStatus.Partial && _candidates.Any(c => c.ExFat?.IsPartial != true))
+                throw new LiveScanProtocolException("Unmarked partial exFAT candidates.");
+        }
         _terminal = true;
         return new(sessionId, terminal, _candidates.ToArray(), _diagnostics.ToArray());
     }
 
     private void ValidateProgress(LiveScanProgressDto value)
     {
+        if (scannerKind == LiveScanScannerKind.ExFatStandardMetadata &&
+            (value.BytesRead > 1024L * 1024 * 1024 || value.DirectoriesExamined > 100_000 ||
+             value.DirectoryEntriesExamined > 2_000_000 || value.FatEntriesInspected > 4_000_000 ||
+             value.CandidatesFound > LiveScanProtocol.MaximumCandidates || value.TotalRecords != 0 ||
+             value.RecordsProcessed != value.DirectoryEntriesExamined))
+            throw new LiveScanProtocolException("ExFAT progress exceeded its hard bounds or invented a total.");
         if (value.ScannerKind != scannerKind || value.RecordsProcessed < _records || value.BytesRead < _bytes ||
             value.CandidatesFound < _found || value.DirectoriesExamined < _directories ||
             value.DirectoryEntriesExamined < _directoryEntries || value.FatEntriesInspected < _fatEntries ||
@@ -245,14 +296,16 @@ internal sealed class LiveScanResultAccumulator(
 
     private void ValidateCandidate(LiveScanCandidateDto candidate)
     {
-        if (candidate.CandidateId == Guid.Empty || candidate.SourceSessionId != sessionId || candidate.ScannerKind != scannerKind ||
-            !candidate.FileSystem.Equals(ExpectedFileSystem(scannerKind), StringComparison.OrdinalIgnoreCase) || candidate.MftRecordNumber < 0 ||
+        if (candidate is null || candidate.Streams is null || candidate.DiagnosticCodes is null || candidate.CandidateId == Guid.Empty || candidate.SourceSessionId != sessionId || candidate.ScannerKind != scannerKind ||
+            !string.Equals(candidate.FileSystem, ExpectedFileSystem(scannerKind), StringComparison.OrdinalIgnoreCase) || candidate.MftRecordNumber < 0 ||
             candidate.LogicalSize < 0 || candidate.Streams.Count > 128 || candidate.DiagnosticCodes.Count > 128 ||
             !Enum.IsDefined(candidate.Category) || !Enum.IsDefined(candidate.PathState) || !Enum.IsDefined(candidate.Recoverability))
         {
             throw new LiveScanProtocolException("A candidate is outside the normalized result bounds.");
         }
 
+        if (scannerKind == LiveScanScannerKind.ExFatStandardMetadata ? !LiveExFatValidation.ValidCandidate(candidate) : candidate.ExFat is not null)
+            throw new LiveScanProtocolException("Invalid or cross-filesystem exFAT metadata.");
         if (scannerKind == LiveScanScannerKind.Fat32StandardMetadata)
         {
             if (candidate.MftRecordNumber != 0 || candidate.SequenceNumber != 0 || candidate.Streams.Count != 0 ||
@@ -272,6 +325,7 @@ internal sealed class LiveScanResultAccumulator(
         ValidateString(candidate.OriginalPath, LiveScanProtocol.MaximumStringCharacters);
         foreach (var stream in candidate.Streams)
         {
+            if (stream is null) throw new LiveScanProtocolException("Null stream.");
             ValidateString(stream.Name, 255);
             if (stream.LogicalSize < 0 || !Enum.IsDefined(stream.Storage) || !Enum.IsDefined(stream.AllocationState))
                 throw new LiveScanProtocolException("A stream summary is invalid.");
@@ -284,6 +338,7 @@ internal sealed class LiveScanResultAccumulator(
     {
         LiveScanScannerKind.NtfsStandardMetadata => "NTFS",
         LiveScanScannerKind.Fat32StandardMetadata => "FAT32",
+        LiveScanScannerKind.ExFatStandardMetadata => "exFAT",
         _ => throw new LiveScanProtocolException("The scanner kind is invalid."),
     };
 

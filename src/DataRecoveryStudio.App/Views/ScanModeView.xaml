@@ -9,7 +9,7 @@
                 <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <StackPanel>
-                <Button Command="{Binding BackCommand}" HorizontalAlignment="Left" Padding="11,6"
+                <Button Command="{Binding BackCommand, Mode=OneWay}" HorizontalAlignment="Left" Padding="11,6"
                         AutomationProperties.Name="{Binding DataContext.Localization[Action.Back], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}">
                     <StackPanel Orientation="Horizontal"><Path Data="{StaticResource IconArrowLeft}" Style="{StaticResource IconPathStyle}" Width="15" Height="15"/><TextBlock Text="{Binding DataContext.Localization[Action.Back], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Margin="7,0,0,0"/></StackPanel>
                 </Button>
@@ -42,38 +42,38 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <RadioButton Grid.Column="0" Style="{StaticResource ScanModeCardStyle}" GroupName="ScanModes"
                              IsChecked="{Binding IsStandardSelected, Mode=OneWay}" IsEnabled="{Binding IsStandardEnabled, Mode=OneWay}"
-                             Command="{Binding SelectModeCommand}" CommandParameter="{x:Static core:ScanModeKind.Standard}"
+                             Command="{Binding SelectModeCommand, Mode=OneWay}" CommandParameter="{x:Static core:ScanModeKind.Standard}"
                              AutomationProperties.Name="{Binding DataContext.Localization[ScanMode.Standard], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}"
                              AutomationProperties.HelpText="{Binding CapabilityReason, Mode=OneWay}">
                     <StackPanel>
                         <Grid><Border Width="48" Height="48" CornerRadius="{StaticResource RadiusLarge}" Background="{DynamicResource AccentSubtleBrush}" HorizontalAlignment="Left"><Path Data="{StaticResource IconScanFast}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource AccentTextBrush}" Width="26" Height="26" HorizontalAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="{Binding DataContext.Localization[ScanMode.Standard], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}"/></Border>
                             <Border HorizontalAlignment="Right" Background="{DynamicResource AccentSubtleBrush}" CornerRadius="{StaticResource RadiusSmall}" Padding="8,4"><TextBlock Text="{Binding DataContext.Localization[ScanMode.Recommended], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource AccentTextBrush}" FontSize="10" FontWeight="SemiBold"/></Border></Grid>
                         <TextBlock Text="{Binding DataContext.Localization[ScanMode.Standard], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource SectionTitleStyle}" Margin="0,14,0,0"/>
-                        <TextBlock Text="{Binding LiveStandardDescription, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,7,0,0" TextWrapping="Wrap" Visibility="{Binding IsLiveScan, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                        <TextBlock Text="{Binding DataContext.Localization[ScanMode.AdminApproval], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding IsLiveScan, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                        <TextBlock Text="{Binding LiveBestEffortDescription, Mode=OneWay}" Foreground="{DynamicResource InformationBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding IsLiveScan, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                        <TextBlock Text="{Binding DataContext.Localization[ScanMode.StandardBody], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,7,0,0" TextWrapping="Wrap" Visibility="{Binding IsDevelopmentMock, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                        <TextBlock Text="{Binding LiveStandardDescription, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,7,0,0" TextWrapping="Wrap" Visibility="{Binding IsLiveScan, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"/>
+                        <TextBlock Text="{Binding DataContext.Localization[ScanMode.AdminApproval], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding IsLiveScan, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"/>
+                        <TextBlock Text="{Binding LiveBestEffortDescription, Mode=OneWay}" Foreground="{DynamicResource InformationBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding IsLiveScan, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"/>
+                        <TextBlock Text="{Binding DataContext.Localization[ScanMode.StandardBody], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,7,0,0" TextWrapping="Wrap" Visibility="{Binding IsDevelopmentMock, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"/>
                     </StackPanel>
                 </RadioButton>
 
                 <RadioButton Grid.Column="2" Style="{StaticResource ScanModeCardStyle}" GroupName="ScanModes"
                              IsChecked="{Binding IsDeepSelected, Mode=OneWay}" IsEnabled="{Binding IsDeepEnabled, Mode=OneWay}"
-                             Command="{Binding SelectModeCommand}" CommandParameter="{x:Static core:ScanModeKind.Deep}"
+                             Command="{Binding SelectModeCommand, Mode=OneWay}" CommandParameter="{x:Static core:ScanModeKind.Deep}"
                              AutomationProperties.Name="{Binding DataContext.Localization[ScanMode.Deep], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}"
                              AutomationProperties.HelpText="{Binding DataContext.Localization[ScanMode.DeepUnavailableBody], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}">
                     <StackPanel>
                         <Grid><Border Width="48" Height="48" CornerRadius="{StaticResource RadiusLarge}" Background="{DynamicResource SurfaceRaisedBrush}" HorizontalAlignment="Left"><Path Data="{StaticResource IconScanDeep}" Style="{StaticResource IconPathStyle}" Stroke="{DynamicResource TextTertiaryBrush}" Width="26" Height="26" HorizontalAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="{Binding DataContext.Localization[ScanMode.DeepComingLater], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}"/></Border>
-                            <Border HorizontalAlignment="Right" Background="{DynamicResource WarningSubtleBrush}" CornerRadius="{StaticResource RadiusSmall}" Padding="8,4" Visibility="{Binding IsDeepUnavailable, Converter={StaticResource BoolToVisibilityConverter}}"><TextBlock Text="{Binding DataContext.Localization[ScanMode.DeepComingLater], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource WarningBrush}" FontSize="10" FontWeight="SemiBold"/></Border></Grid>
+                            <Border HorizontalAlignment="Right" Background="{DynamicResource WarningSubtleBrush}" CornerRadius="{StaticResource RadiusSmall}" Padding="8,4" Visibility="{Binding IsDeepUnavailable, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"><TextBlock Text="{Binding DataContext.Localization[ScanMode.DeepComingLater], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Foreground="{DynamicResource WarningBrush}" FontSize="10" FontWeight="SemiBold"/></Border></Grid>
                         <TextBlock Text="{Binding DataContext.Localization[ScanMode.Deep], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource SectionTitleStyle}" Margin="0,14,0,0"/>
-                        <TextBlock Text="{Binding DataContext.Localization[ScanMode.DeepUnavailableBody], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,7,0,0" TextWrapping="Wrap" Visibility="{Binding IsDeepUnavailable, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                        <TextBlock Text="{Binding DataContext.Localization[ScanMode.DeepBody], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,7,0,0" TextWrapping="Wrap" Visibility="{Binding IsDevelopmentMock, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                        <TextBlock Text="{Binding DataContext.Localization[ScanMode.DeepUnavailableBody], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,7,0,0" TextWrapping="Wrap" Visibility="{Binding IsDeepUnavailable, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"/>
+                        <TextBlock Text="{Binding DataContext.Localization[ScanMode.DeepBody], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Style="{StaticResource PageSubtitleStyle}" Margin="0,7,0,0" TextWrapping="Wrap" Visibility="{Binding IsDevelopmentMock, Converter={StaticResource BoolToVisibilityConverter}, Mode=OneWay}"/>
                     </StackPanel>
                 </RadioButton>
             </Grid>
 
             <Grid Grid.Row="4" Margin="0,18,0,0">
                 <TextBlock Text="{Binding OutcomeMessage, Mode=OneWay}" Foreground="{DynamicResource CriticalBrush}" TextWrapping="Wrap" VerticalAlignment="Center" MaxWidth="650" HorizontalAlignment="Left" AutomationProperties.LiveSetting="Assertive"/>
-                <Button Content="{Binding DataContext.Localization[Action.StartScan], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Command="{Binding StartScanCommand}" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Right" MinWidth="150" IsDefault="True" AutomationProperties.HelpText="{Binding CapabilityReason, Mode=OneWay}"/>
+                <Button Content="{Binding DataContext.Localization[Action.StartScan], RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" Command="{Binding StartScanCommand, Mode=OneWay}" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Right" MinWidth="150" IsDefault="True" AutomationProperties.HelpText="{Binding CapabilityReason, Mode=OneWay}"/>
             </Grid>
         </Grid>
     </ScrollViewer>

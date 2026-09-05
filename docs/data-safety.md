@@ -59,3 +59,20 @@ These invariants are release-blocking requirements, not recommendations.
 - Code review includes a source-write threat-model checklist before any platform adapter is merged.
 
 The Phase 3 adapter invokes only `FindFirstVolumeW`, `FindNextVolumeW`, `FindVolumeClose`, `GetVolumePathNamesForVolumeNameW`, `GetVolumeInformationW`, `GetDiskFreeSpaceExW`, `GetDriveTypeW`, `CreateFileW`, and `DeviceIoControl`. Its only IOCTLs are `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`, `IOCTL_STORAGE_QUERY_PROPERTY`, and `IOCTL_DISK_GET_DRIVE_GEOMETRY_EX`. It does not import or call `ReadFile` or `WriteFile`, does not issue an FSCTL, and does not retain device handles after enumeration.
+
+## Phase 8A image-only boundary
+
+exFAT accepts ordinary non-reparse image files through the existing `Open` / `Read` / `Share.Read` opener. Its metadata scanner never reads candidate or active-file content; the required full-source SHA-256 passes necessarily read all bytes and are separately audited and budgeted. No payload is retained or exposed by metadata scanning. Partial, canceled, changed-source, and invalid scans cannot publish trusted completed sessions. All Phase 5–7 gates and Phase 7D's deferred hardware-validation status are preserved. Details: [Phase 8A safety and provenance](phase-8a-exfat-image-metadata.md).
+
+## Phase 8B image recovery boundary
+
+Recovery requires the owning Application service's completed Phase 8A session, candidate IDs, a destination, and explicit policy. Only empty streams and all-free contiguous layouts are enabled by default; validated preserved FAT chains require opt-in. Damaged extraction metadata, allocated or unknown spans, and active ownership conflicts remain blocked. Names never select output directories. Uncertain names receive deterministic generated names without increasing confidence in the byte layout.
+
+The engine holds the source read-only, verifies its file identity and full fingerprint, reuses the production metadata scanner once, stages exact `ValidDataLength` copies and zeros through `DataLength`, and checks the full source fingerprint again before publication. All source requests, including failed exact reads, are charged against the existing ceiling; fingerprints, completed metadata reads, and completed payload reads are distinct counters. Managed source read-ahead is disabled. Independent destination rereads verify the reconstructed stream's length and hash. This proves copy fidelity, not original-content integrity.
+
+Shared destination validation rejects device/ADS/reparse paths, sanitizes flat names, and never overwrites existing entries. Windows directory leases protect ancestors during creation/probing; exFAT holds an additional lease through publication and cleanup. Owned file identities guard cleanup, and failed exclusive creation never grants ownership. Earlier verified outputs survive later cancellation/failure. Image recovery may use an ordinary folder on the same host volume as the image; it does not inherit live-device destination restrictions. No live exFAT, preview, WPF, worker, filesystem repair, or USB testing is introduced. See [Phase 8B details and limits](phase-8b-exfat-image-recovery.md).
+
+
+## Phase 8C live exFAT boundary
+
+Live exFAT requires its own exact environment opt-in. Read-only volume flags remain unchanged. Metadata and bounded consistency rereads share one live budget, including native partial reads returned before failure. The parser classifies metadata reads, detects active ownership conflicts, and does not intentionally read deleted payload. Matching bootstrap samples do not establish a snapshot or stable allocation. Canceled, removed and changed results discard candidates; partial results downgrade allocation. No live candidate can authorize recovery or open a destination dialog. See [Phase 8C](phase-8c-live-exfat-standard-scan.md). Phase 7D hardware validation remains deferred.

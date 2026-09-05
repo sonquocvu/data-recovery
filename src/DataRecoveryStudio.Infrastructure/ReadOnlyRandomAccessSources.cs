@@ -61,6 +61,8 @@ internal static class SafeImagePath
         RejectDeviceNamespace(path);
         var fullPath = Path.GetFullPath(path);
         RejectDeviceNamespace(fullPath);
+        if (fullPath.AsSpan(Path.GetPathRoot(fullPath)!.Length).Contains(':'))
+            throw new NotSupportedException("Alternate data streams are not ordinary image or destination paths.");
         return fullPath;
     }
 
@@ -92,7 +94,8 @@ internal sealed class RegularFileOpener : IRegularFileOpener
         FileMode.Open,
         FileAccess.Read,
         FileShare.Read,
-        bufferSize: 4096,
+        // Exact metadata/payload ranges must not trigger FileStream read-ahead into adjacent bytes.
+        bufferSize: 1,
         FileOptions.Asynchronous | FileOptions.RandomAccess);
 }
 
@@ -103,6 +106,7 @@ internal sealed class FileRandomAccessSource(FileStream stream) : IReadOnlyRando
     private int _disposeState;
 
     public long Length => _stream.Length;
+    internal Microsoft.Win32.SafeHandles.SafeFileHandle Handle => _stream.SafeFileHandle;
 
     public async ValueTask ReadExactlyAsync(long offset, Memory<byte> destination, CancellationToken cancellationToken)
     {

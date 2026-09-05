@@ -3,7 +3,7 @@ using System.Globalization;
 
 namespace DataRecoveryStudio.Infrastructure;
 
-public sealed class DictionaryLocalizationService : ILocalizationService
+public sealed partial class DictionaryLocalizationService : ILocalizationService
 {
     private static readonly IReadOnlyDictionary<string, string> English = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -66,8 +66,8 @@ public sealed class DictionaryLocalizationService : ILocalizationService
         ["LiveScan.Partial"] = "The live metadata scan returned a bounded partial result.",
         ["LiveScan.ChangedDuringScan"] = "The live filesystem changed during scanning, so results are best-effort and partial.",
         ["LiveScan.UnexpectedFailure"] = "The live metadata scan could not be completed.",
-        ["App.Phase5BBadge"] = "PHASE 7D · LIVE FAT32 VALIDATION GATE",
-        ["App.VersionPhase5B"] = "v0.7.3 · Phase 7D validation preview",
+        ["App.Phase5BBadge"] = "PHASE 8C · READ-ONLY METADATA PREVIEW",
+        ["App.VersionPhase5B"] = "v0.8.3 · Metadata preview",
         ["Validation.LiveFat32.Passed"] = "Controlled live FAT32 validation passed.",
         ["Validation.LiveFat32.Failed"] = "Controlled live FAT32 validation failed.",
         ["Validation.LiveFat32.Skipped"] = "Controlled live FAT32 validation was skipped; this is not a pass.",
@@ -384,8 +384,8 @@ public sealed class DictionaryLocalizationService : ILocalizationService
         ["Fat32Allocation.DamagedMetadata"] = "Siêu dữ liệu bị hỏng",
         ["Fat32Allocation.AllocationUnknown"] = "Không rõ cấp phát sau thay đổi trực tiếp",
         ["Fat32Allocation.Unknown"] = "Không rõ cấp phát",
-        ["App.Phase5BBadge"] = "GIAI ĐOẠN 7D · CỔNG XÁC THỰC FAT32 TRỰC TIẾP",
-        ["App.VersionPhase5B"] = "v0.7.3 · Bản xem trước xác thực Giai đoạn 7D",
+        ["App.Phase5BBadge"] = "GIAI ĐOẠN 8C · XEM SIÊU DỮ LIỆU CHỈ ĐỌC",
+        ["App.VersionPhase5B"] = "v0.8.3 · Xem siêu dữ liệu",
         ["Validation.LiveFat32.Passed"] = "Xác thực FAT32 trực tiếp có kiểm soát đã đạt.",
         ["Validation.LiveFat32.Failed"] = "Xác thực FAT32 trực tiếp có kiểm soát đã thất bại.",
         ["Validation.LiveFat32.Skipped"] = "Xác thực FAT32 trực tiếp đã bị bỏ qua; đây không phải là kết quả đạt.",

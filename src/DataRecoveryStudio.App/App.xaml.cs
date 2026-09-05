@@ -32,6 +32,7 @@ public partial class App : System.Windows.Application
             "1",
             StringComparison.Ordinal);
         var liveStandardScanEnabled = !isDevelopmentMode && LiveStandardScanFeatureGate.IsEnabled();
+        var liveExFatStandardScanEnabled = !isDevelopmentMode && LiveExFatStandardScanFeatureGate.IsEnabled();
         var liveFat32StandardScanEnabled = !isDevelopmentMode && LiveFat32StandardScanFeatureGate.IsEnabled();
         IDeviceDiscoveryService discovery = isDevelopmentMode
             ? new MockDeviceDiscoveryService()
@@ -39,9 +40,9 @@ public partial class App : System.Windows.Application
         IScanService scanService = isDevelopmentMode ? new MockScanService() : new UnavailableScanService();
         IRecoveryCatalogService catalogService = isDevelopmentMode ? new MockRecoveryCatalogService() : new UnavailableRecoveryCatalogService();
         ILiveScanUiOrchestrator? liveOrchestrator = null;
-        if (liveStandardScanEnabled || liveFat32StandardScanEnabled)
+        if (liveStandardScanEnabled || liveFat32StandardScanEnabled || liveExFatStandardScanEnabled)
         {
-            var authority = new LiveScanTargetGrantAuthority(ntfsEnabled: liveStandardScanEnabled, fat32Enabled: liveFat32StandardScanEnabled);
+            var authority = new LiveScanTargetGrantAuthority(ntfsEnabled: liveStandardScanEnabled, fat32Enabled: liveFat32StandardScanEnabled, exFatEnabled: liveExFatStandardScanEnabled);
             var workerClient = new NamedPipeLiveScanWorkerClient(AppContext.BaseDirectory, logger: _logger);
             liveOrchestrator = new LiveScanUiOrchestrator(
                 authority,
@@ -57,7 +58,7 @@ public partial class App : System.Windows.Application
             isDevelopmentMode,
             liveStandardScanEnabled,
             liveOrchestrator,
-            liveFat32StandardScanEnabled);
+            liveFat32StandardScanEnabled, liveExFatStandardScanEnabled);
         var window = new MainWindow(_viewModel);
         MainWindow = window;
 
@@ -66,11 +67,12 @@ public partial class App : System.Windows.Application
             "ApplicationStarting",
             CreateRuntimeProperties(new Dictionary<string, object?>
             {
-                ["phase"] = "7D",
-                ["dataMode"] = isDevelopmentMode ? "explicit-development-mock" : liveStandardScanEnabled || liveFat32StandardScanEnabled ? "gated-live-standard-scan" : "windows-metadata-only",
+                ["phase"] = "8C",
+                ["dataMode"] = isDevelopmentMode ? "explicit-development-mock" : liveStandardScanEnabled || liveFat32StandardScanEnabled || liveExFatStandardScanEnabled ? "gated-live-standard-scan" : "windows-metadata-only",
                 ["developmentMode"] = isDevelopmentMode,
                 ["liveStandardScanEnabled"] = liveStandardScanEnabled,
                 ["liveFat32StandardScanEnabled"] = liveFat32StandardScanEnabled,
+                ["liveExFatStandardScanEnabled"] = liveExFatStandardScanEnabled,
             }));
         await _viewModel.InitializeAsync();
         ApplyCurrentCulture(_localization.LanguageCode);

@@ -11,6 +11,7 @@ public sealed class ScanModeViewModel : ObservableObject
     private readonly bool _isDevelopmentMode;
     private readonly bool _liveStandardScanEnabled;
     private readonly bool _liveFat32StandardScanEnabled;
+    private readonly bool _liveExFatStandardScanEnabled;
     private StorageDevice? _source;
     private ScanModeKind? _selectedMode;
     private ScanCapability? _capability;
@@ -18,7 +19,8 @@ public sealed class ScanModeViewModel : ObservableObject
 
     public ScanModeViewModel(Action goBack, Action<StorageDevice, ScanModeKind> startScan,
         ILocalizationService? localization = null, bool isDevelopmentMode = false, bool liveStandardScanEnabled = false,
-        bool liveFat32StandardScanEnabled = false)
+        bool liveFat32StandardScanEnabled = false,
+        bool liveExFatStandardScanEnabled = false)
     {
         _goBack = goBack;
         _startScan = startScan;
@@ -26,6 +28,7 @@ public sealed class ScanModeViewModel : ObservableObject
         _isDevelopmentMode = isDevelopmentMode;
         _liveStandardScanEnabled = liveStandardScanEnabled;
         _liveFat32StandardScanEnabled = liveFat32StandardScanEnabled;
+        _liveExFatStandardScanEnabled = liveExFatStandardScanEnabled;
         BackCommand = new RelayCommand(_goBack);
         SelectModeCommand = new RelayCommand<ScanModeKind>(SelectMode, CanSelectMode);
         StartScanCommand = new RelayCommand(Start, () => SelectedMode switch
@@ -45,7 +48,7 @@ public sealed class ScanModeViewModel : ObservableObject
             if (SetProperty(ref _source, value))
             {
                 OutcomeMessage = null;
-                Capability = value is null ? null : ScanCapabilityEvaluator.Evaluate(value, _isDevelopmentMode, _liveStandardScanEnabled, _liveFat32StandardScanEnabled);
+                Capability = value is null ? null : ScanCapabilityEvaluator.Evaluate(value, _isDevelopmentMode, _liveStandardScanEnabled, _liveFat32StandardScanEnabled, _liveExFatStandardScanEnabled);
                 RefreshDisplayProperties();
             }
 
@@ -81,9 +84,10 @@ public sealed class ScanModeViewModel : ObservableObject
     public string? OutcomeMessage { get => _outcomeMessage; private set { if (SetProperty(ref _outcomeMessage, value)) OnPropertyChanged(nameof(HasOutcomeMessage)); } }
     public bool HasOutcomeMessage => !string.IsNullOrWhiteSpace(OutcomeMessage);
     public bool IsLiveScan => Capability?.IsLive == true;
+    public bool IsExFatLiveScan => Capability?.Kind == ScanCapabilityKind.LiveExFatStandardScanAvailable;
     public bool IsFat32LiveScan => Capability?.Kind == ScanCapabilityKind.LiveFat32StandardScanAvailable;
-    public string LiveStandardDescription => Localize(IsFat32LiveScan ? "ScanMode.LiveFat32StandardBody" : "ScanMode.LiveStandardBody");
-    public string LiveBestEffortDescription => Localize(IsFat32LiveScan ? "ScanMode.LiveFat32BestEffort" : "ScanMode.LiveBestEffort");
+    public string LiveStandardDescription => Localize(IsExFatLiveScan ? "ScanMode.LiveExFatStandardBody" : IsFat32LiveScan ? "ScanMode.LiveFat32StandardBody" : "ScanMode.LiveStandardBody");
+    public string LiveBestEffortDescription => Localize(IsExFatLiveScan ? "ScanMode.LiveExFatBestEffort" : IsFat32LiveScan ? "ScanMode.LiveFat32BestEffort" : "ScanMode.LiveBestEffort");
     public bool IsDevelopmentMock => Capability?.Kind == ScanCapabilityKind.DevelopmentMock;
     public bool IsStandardEnabled => Capability?.CanStartStandard == true;
     public bool IsDeepEnabled => Capability?.CanStartDeep == true;
@@ -140,6 +144,7 @@ public sealed class ScanModeViewModel : ObservableObject
         OnPropertyChanged(nameof(CapabilityReason));
         OnPropertyChanged(nameof(IsLiveScan));
         OnPropertyChanged(nameof(IsFat32LiveScan));
+        OnPropertyChanged(nameof(IsExFatLiveScan));
         OnPropertyChanged(nameof(LiveStandardDescription));
         OnPropertyChanged(nameof(LiveBestEffortDescription));
         OnPropertyChanged(nameof(IsDevelopmentMock));
@@ -220,14 +225,14 @@ public sealed class ScanProgressViewModel : ObservableObject
     public string SourceMountPath => _source?.Volumes.FirstOrDefault()?.MountPath ?? string.Empty;
     public string SourceFileSystem => _source?.Volumes.FirstOrDefault()?.FileSystem ?? string.Empty;
     public string ModeName => _mode == ScanModeKind.Standard ? Localize("ScanMode.Standard") : Localize("ScanMode.Deep");
-    public string AmountScanned => IsLiveFat32Scan ? DirectoryEntriesExamined.ToString("N0") : IsLiveScan ? RecordsExamined.ToString("N0") : $"{ByteFormatter.Format(BytesScanned)} / {ByteFormatter.Format(TotalBytes)}";
+    public string AmountScanned => IsLiveDirectoryScan ? DirectoryEntriesExamined.ToString("N0") : IsLiveScan ? RecordsExamined.ToString("N0") : $"{ByteFormatter.Format(BytesScanned)} / {ByteFormatter.Format(TotalBytes)}";
     public string ElapsedText => FormatDuration(Elapsed);
     public string RemainingText => IsLiveScan ? Localize("Progress.RemainingUnavailable") :
         EstimatedRemaining is null ? Localize("Progress.Calculating") : FormatRemaining(EstimatedRemaining.Value);
     public string LiveDisclosure => Localize("Progress.LiveBestEffort");
     public string ReadOnlyDisclosure => Localize("Progress.ReadOnlyDisclosure");
-    public string LiveScanKind => Localize(IsLiveFat32Scan ? "Progress.ReadOnlyKind.Fat32" : "Progress.ReadOnlyKind");
-    public string PrimaryLiveMetricLabel => Localize(IsLiveFat32Scan ? "Progress.DirectoryEntriesExamined" : "Progress.RecordsExamined");
+    public string LiveScanKind => Localize(IsLiveExFatScan ? "Progress.ReadOnlyKind.ExFat" : IsLiveFat32Scan ? "Progress.ReadOnlyKind.Fat32" : "Progress.ReadOnlyKind");
+    public string PrimaryLiveMetricLabel => Localize(IsLiveDirectoryScan ? "Progress.DirectoryEntriesExamined" : "Progress.RecordsExamined");
     public string CancelConfirmationBody => IsLiveScan ? Localize("Progress.LiveCancelBody") : Localize("Progress.CancelBody");
     public bool IsCanceling => IsLiveScan ? LiveState is LiveScanUiState.CancelRequested or LiveScanUiState.Canceling : State == ScanState.Canceling;
     public bool CanCancel => IsLiveScan ? _liveStateMachine.IsActive && !_cancelRequestIssued : State is ScanState.Starting or ScanState.Scanning;
@@ -235,7 +240,9 @@ public sealed class ScanProgressViewModel : ObservableObject
     public bool IsCancellationConfirmationOpen => _isCancellationConfirmationOpen;
     public bool IsLiveScan => _isLiveScan;
     public bool IsLiveFat32Scan => IsLiveScan && SourceFileSystem.Equals("FAT32", StringComparison.OrdinalIgnoreCase);
-    public bool IsLiveNtfsScan => IsLiveScan && !IsLiveFat32Scan;
+    public bool IsLiveExFatScan => IsLiveScan && SourceFileSystem.Equals("exFAT", StringComparison.OrdinalIgnoreCase);
+    public bool IsLiveDirectoryScan => IsLiveFat32Scan || IsLiveExFatScan;
+    public bool IsLiveNtfsScan => IsLiveScan && !IsLiveDirectoryScan;
     public bool IsMockScan => !_isLiveScan;
     public bool IsIndeterminate => IsLiveScan && (LiveState is LiveScanUiState.ValidatingSelection or LiveScanUiState.RequestingPermission or LiveScanUiState.LaunchingWorker or LiveScanUiState.ConnectingSecureChannel || TotalBytes <= 0);
     public bool HasDeterminateProgress => !IsIndeterminate;
@@ -411,6 +418,8 @@ public sealed class ScanProgressViewModel : ObservableObject
         OnPropertyChanged(nameof(ModeName));
         OnPropertyChanged(nameof(IsLiveScan));
         OnPropertyChanged(nameof(IsLiveFat32Scan));
+        OnPropertyChanged(nameof(IsLiveExFatScan));
+        OnPropertyChanged(nameof(IsLiveDirectoryScan));
         OnPropertyChanged(nameof(IsLiveNtfsScan));
         OnPropertyChanged(nameof(LiveScanKind));
         OnPropertyChanged(nameof(PrimaryLiveMetricLabel));
@@ -576,11 +585,11 @@ public sealed class ScanProgressViewModel : ObservableObject
 
     private LiveScanResult CreateTerminalResult(LiveScanTerminalStatus status, string reason)
     {
-        var scanner = IsLiveFat32Scan ? LiveScanScannerKind.Fat32StandardMetadata : LiveScanScannerKind.NtfsStandardMetadata;
+        var scanner = IsLiveExFatScan ? LiveScanScannerKind.ExFatStandardMetadata : IsLiveFat32Scan ? LiveScanScannerKind.Fat32StandardMetadata : LiveScanScannerKind.NtfsStandardMetadata;
         return new(Guid.NewGuid(), new(status, LiveScanConsistency.Partial, 0, 0, 0, 0, true, reason)
         {
             ScannerKind = scanner,
-            FileSystem = scanner == LiveScanScannerKind.Fat32StandardMetadata ? "FAT32" : "NTFS",
+            FileSystem = LiveScanScannerSelector.FileSystem(scanner),
         }, [], []);
     }
 

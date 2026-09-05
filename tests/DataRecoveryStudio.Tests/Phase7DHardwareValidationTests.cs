@@ -29,8 +29,8 @@ public sealed class Phase7DHardwareValidationTests
         Assert.False(Read().IsEnabled);
         values[LiveFat32HardwareValidationOptions.RunVariable] = "1";
         Assert.True(Read().IsEnabled);
-        Assert.Equal(3, LiveScanProtocol.Version);
-        Assert.Equal("7D.1", LiveScanProtocol.WorkerVersion);
+        Assert.Equal(4, LiveScanProtocol.Version);
+        Assert.Equal("8C.1", LiveScanProtocol.WorkerVersion);
     }
 
     [Fact]

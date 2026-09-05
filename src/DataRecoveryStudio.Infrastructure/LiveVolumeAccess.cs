@@ -129,6 +129,7 @@ public sealed class LiveVolumeRandomAccessSource : IReadOnlyRandomAccessSource
     }
 
     public long Length { get; }
+    internal long TotalBytesRead => Interlocked.Read(ref _totalBytes);
 
     public async ValueTask ReadExactlyAsync(long offset, Memory<byte> destination, CancellationToken cancellationToken)
     {
@@ -168,9 +169,10 @@ public sealed class LiveVolumeRandomAccessSource : IReadOnlyRandomAccessSource
                 }
 
                 read = checked(read + count);
+                _totalBytes = checked(_totalBytes + count);
             }
 
-            _totalBytes = checked(_totalBytes + read);
+
         }
         finally
         {

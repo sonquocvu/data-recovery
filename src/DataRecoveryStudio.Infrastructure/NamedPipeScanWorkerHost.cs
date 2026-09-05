@@ -39,7 +39,8 @@ public sealed record ScanWorkerArguments(
             nonce.Length != 64 || nonce.Any(character => !Uri.IsHexDigit(character)) ||
             !int.TryParse(protocolText, System.Globalization.CultureInfo.InvariantCulture, out var protocol) ||
             !Enum.TryParse<LiveScanScannerKind>(scannerText, ignoreCase: false, out var scannerKind) ||
-            scannerKind is not (LiveScanScannerKind.NtfsStandardMetadata or LiveScanScannerKind.Fat32StandardMetadata))
+            scannerText != scannerKind.ToString() ||
+            scannerKind is not (LiveScanScannerKind.NtfsStandardMetadata or LiveScanScannerKind.Fat32StandardMetadata or LiveScanScannerKind.ExFatStandardMetadata))
         {
             throw new ArgumentException("The worker arguments are malformed.");
         }
@@ -168,6 +169,12 @@ public sealed class NamedPipeScanWorkerHost(ILiveScanExecutor executor)
         try
         {
             await progressWriter.ConfigureAwait(false);
+            if (Volatile.Read(ref cancelReceived) != 0 || outerCancellation.IsCancellationRequested)
+                execution = execution with
+                {
+                    Terminal = execution.Terminal with
+                    { Status = LiveScanTerminalStatus.Canceled, Consistency = LiveScanConsistency.Partial, IsPartial = true, ReasonCode = "Canceled" }
+                };
             if (execution.Terminal.Status is not (LiveScanTerminalStatus.Completed or LiveScanTerminalStatus.Partial))
             {
                 execution = execution with
@@ -182,14 +189,14 @@ public sealed class NamedPipeScanWorkerHost(ILiveScanExecutor executor)
             foreach (var batch in execution.Candidates.Chunk(budgets.CandidateBatchSize))
             {
                 await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.CandidateBatch,
-                    new LiveScanCandidateBatchDto(candidateSequence++, batch), publicationTimeout.Token).ConfigureAwait(false);
+                    new LiveScanCandidateBatchDto(candidateSequence++, batch) { ScannerKind = start.ScannerKind }, publicationTimeout.Token).ConfigureAwait(false);
             }
 
             var diagnosticSequence = 0;
             foreach (var batch in execution.Diagnostics.Chunk(LiveScanProtocol.MaximumDiagnosticBatchSize))
             {
                 await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.DiagnosticBatch,
-                    new LiveScanDiagnosticBatchDto(diagnosticSequence++, batch), publicationTimeout.Token).ConfigureAwait(false);
+                    new LiveScanDiagnosticBatchDto(diagnosticSequence++, batch) { ScannerKind = start.ScannerKind }, publicationTimeout.Token).ConfigureAwait(false);
             }
 
             await LiveScanProtocolCodec.WriteAsync(pipe, sessionId, LiveScanMessageKind.TerminalResult,
@@ -254,12 +261,16 @@ public sealed class NamedPipeScanWorkerHost(ILiveScanExecutor executor)
         ArgumentNullException.ThrowIfNull(start.Budgets);
         start.Budgets.Validate();
         _ = CanonicalVolumeGuidPath.Parse(start.Grant.CanonicalVolumeGuidPath);
-        if (start.Grant.GrantId == Guid.Empty || start.Grant.CorrelationId != arguments.SessionId || start.Grant.DiscoveryGeneration <= 0 || start.Grant.ExpiresAt <= DateTimeOffset.UtcNow ||
+        if (start.Grant.Nonce is null || start.Grant.FileSystem is null || start.Grant.VolumeIdentity is null ||
+            start.Grant.DisplayMountPath is null || start.Grant.PhysicalDeviceIdentities is null || start.Grant.PhysicalDiskNumbers is null ||
+            start.Grant.CapacityBytes <= 0 || !start.Grant.IsMounted || !start.Grant.IsLocal || !start.Grant.IsSupported || !start.Grant.IsConnected ||
+            (start.ScannerKind == LiveScanScannerKind.ExFatStandardMetadata && !LiveExFatValidation.ValidExtents(start.Grant.Extents, start.Grant.CapacityBytes, start.Grant.PhysicalDiskNumbers)) ||
+            start.Grant.Nonce.Any(c => !Uri.IsHexDigit(c)) || start.Grant.GrantId == Guid.Empty || start.Grant.CorrelationId != arguments.SessionId || start.Grant.DiscoveryGeneration <= 0 || start.Grant.ExpiresAt <= DateTimeOffset.UtcNow ||
             start.Grant.Nonce.Length != 64 || start.Grant.PhysicalDeviceIdentities.Count is 0 or > 128 ||
-            start.Grant.PhysicalDeviceIdentities.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 256) ||
+            start.Grant.PhysicalDeviceIdentities.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 256 || HasProhibitedCharacters(value)) ||
             start.Grant.PhysicalDiskNumbers.Count is 0 or > 128 || start.Grant.PhysicalDiskNumbers.Any(number => number < 0) ||
-            start.ScannerKind is not (LiveScanScannerKind.NtfsStandardMetadata or LiveScanScannerKind.Fat32StandardMetadata) || start.ScannerKind != arguments.ScannerKind || start.Grant.ScannerKind != arguments.ScannerKind ||
-            !start.Grant.FileSystem.Equals(arguments.ScannerKind == LiveScanScannerKind.NtfsStandardMetadata ? "NTFS" : "FAT32", StringComparison.OrdinalIgnoreCase) ||
+            start.ScannerKind is not (LiveScanScannerKind.NtfsStandardMetadata or LiveScanScannerKind.Fat32StandardMetadata or LiveScanScannerKind.ExFatStandardMetadata) || start.ScannerKind != arguments.ScannerKind || start.Grant.ScannerKind != arguments.ScannerKind ||
+            !start.Grant.FileSystem.Equals(arguments.ScannerKind == LiveScanScannerKind.ExFatStandardMetadata ? "exFAT" : arguments.ScannerKind == LiveScanScannerKind.NtfsStandardMetadata ? "NTFS" : "FAT32", StringComparison.OrdinalIgnoreCase) ||
             start.Grant.FileSystem.Length > 16 || start.Grant.VolumeIdentity.Length is 0 or > 256 ||
             start.Grant.DisplayMountPath.Length > 260 ||
             HasProhibitedCharacters(start.Grant.FileSystem) || HasProhibitedCharacters(start.Grant.VolumeIdentity) ||
@@ -277,7 +288,7 @@ public sealed class NamedPipeScanWorkerHost(ILiveScanExecutor executor)
         new(status, LiveScanConsistency.Partial, 0, 0, 0, 0, true, reason)
         {
             ScannerKind = scannerKind,
-            FileSystem = scannerKind == LiveScanScannerKind.Fat32StandardMetadata ? "FAT32" : "NTFS",
+            FileSystem = scannerKind == LiveScanScannerKind.ExFatStandardMetadata ? "exFAT" : scannerKind == LiveScanScannerKind.Fat32StandardMetadata ? "FAT32" : "NTFS",
             Fat32ScannerVersion = scannerKind == LiveScanScannerKind.Fat32StandardMetadata ? Fat32ScannerVersions.MetadataPhase7A : null,
             SourceHandleDisposed = true,
         },

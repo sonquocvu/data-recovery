@@ -76,6 +76,8 @@ public sealed record PhysicalDisk(
     long CapacityBytes,
     StorageDeviceType Type);
 
+public sealed record VolumeDiskExtent(int DiskNumber, long StartingOffset, long Length);
+
 public sealed record Volume(
     string Id,
     string MountPath,
@@ -85,6 +87,7 @@ public sealed record Volume(
     long UsedBytes,
     PhysicalDeviceId PhysicalDeviceId)
 {
+    public IReadOnlyList<VolumeDiskExtent> Extents { get; init; } = [];
     public long FreeBytes => Math.Max(0, CapacityBytes - UsedBytes);
 
     public string VolumeGuidPath { get; init; } = Id;

@@ -35,6 +35,7 @@ internal sealed class RecoveryDestination
         }
 
         ValidateExistingAncestors(root);
+        using var ancestorLease = OperatingSystem.IsWindows() ? new RecoveryDirectoryLease(root, existingAncestorsOnly: true) : null;
         if (File.Exists(root))
         {
             throw new IOException("The recovery destination is a file, not a directory.");
@@ -51,6 +52,7 @@ internal sealed class RecoveryDestination
         }
 
         RejectReparsePoint(root);
+        using var rootLease = OperatingSystem.IsWindows() ? new RecoveryDirectoryLease(root) : null;
         var driveRoot = Path.GetPathRoot(root);
         if (!string.IsNullOrWhiteSpace(driveRoot))
         {
@@ -62,13 +64,15 @@ internal sealed class RecoveryDestination
         }
 
         var probe = Path.Combine(root, $".drs-write-probe-{Guid.NewGuid():N}.tmp");
+        var ownsProbe = false;
         try
         {
             using var stream = new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.WriteThrough);
+            ownsProbe = true;
         }
         finally
         {
-            if (File.Exists(probe))
+            if (ownsProbe && File.Exists(probe))
             {
                 File.Delete(probe);
             }
@@ -133,6 +137,7 @@ internal sealed class RecoveryDestination
 
     public void RevalidateParent(string path)
     {
+        ValidateExistingAncestors(Root);
         var full = EnsureContained(path);
         var directory = Path.GetDirectoryName(full) ?? throw new IOException("The recovered path has no destination directory.");
         var relative = Path.GetRelativePath(Root, directory);
@@ -272,6 +277,7 @@ internal sealed class RecoveryDestination
     private static HashSet<string> BuildReservedNames()
     {
         var values = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "CON", "PRN", "AUX", "NUL", "CLOCK$" };
+        foreach (var digit in new[] { '¹', '²', '³' }) { values.Add("COM" + digit); values.Add("LPT" + digit); }
         for (var index = 1; index <= 9; index++)
         {
             values.Add($"COM{index}");

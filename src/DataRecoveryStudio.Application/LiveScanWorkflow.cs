@@ -6,6 +6,8 @@ public enum ScanCapabilityKind
 {
     LiveNtfsStandardScanAvailable,
     LiveFat32StandardScanAvailable,
+    LiveExFatStandardScanAvailable,
+    LiveExFatStandardScanFeatureDisabled,
     LiveFat32StandardScanFeatureDisabled,
     LiveStandardScanFeatureDisabled,
     AdministratorPermissionRequired,
@@ -47,6 +49,13 @@ public static class LiveFat32StandardScanFeatureGate
     }
 }
 
+public static class LiveExFatStandardScanFeatureGate
+{
+    public const string EnvironmentVariable = "DATA_RECOVERY_STUDIO_ENABLE_LIVE_EXFAT_STANDARD_SCAN";
+    public static bool IsEnabled(Func<string, string?>? readEnvironmentVariable = null) =>
+        string.Equals((readEnvironmentVariable ?? Environment.GetEnvironmentVariable)(EnvironmentVariable), "1", StringComparison.Ordinal);
+}
+
 public static class ScanCapabilityEvaluator
 {
     public static ScanCapability Evaluate(StorageDevice device, bool isDevelopmentMode, bool liveStandardScanEnabled)
@@ -56,7 +65,8 @@ public static class ScanCapabilityEvaluator
         StorageDevice device,
         bool isDevelopmentMode,
         bool liveNtfsStandardScanEnabled,
-        bool liveFat32StandardScanEnabled)
+        bool liveFat32StandardScanEnabled,
+        bool liveExFatStandardScanEnabled = false)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (isDevelopmentMode)
@@ -85,7 +95,8 @@ public static class ScanCapabilityEvaluator
 
         var isNtfs = volume.FileSystem.Equals("NTFS", StringComparison.OrdinalIgnoreCase);
         var isFat32 = volume.FileSystem.Equals("FAT32", StringComparison.OrdinalIgnoreCase);
-        if (!isNtfs && !isFat32)
+        var isExFat = volume.FileSystem.Equals("exFAT", StringComparison.OrdinalIgnoreCase);
+        if (!isNtfs && !isFat32 && !isExFat)
         {
             return Unavailable(ScanCapabilityKind.UnsupportedFilesystem,
                 volume.FileSystem.Equals("exFAT", StringComparison.OrdinalIgnoreCase)
@@ -126,9 +137,14 @@ public static class ScanCapabilityEvaluator
             return Unavailable(ScanCapabilityKind.LiveFat32StandardScanFeatureDisabled, "Capability.LiveFat32PreviewDisabled");
         }
 
+        if (isExFat && !liveExFatStandardScanEnabled)
+            return Unavailable(ScanCapabilityKind.LiveExFatStandardScanFeatureDisabled, "Capability.LiveExFatPreviewDisabled");
+        if (isExFat && (!LiveExFatValidation.ValidExtents(volume.Extents, volume.CapacityBytes, device.PhysicalDisks.Select(d => d.DiskNumber ?? -1)) ||
+            !volume.PhysicalDeviceIds.SetEquals(device.PhysicalDisks.Select(d => d.Id))))
+            return Unavailable(ScanCapabilityKind.UnmappedPhysicalIdentity, "Capability.UnmappedPhysicalIdentity");
         return new(
-            isFat32 ? ScanCapabilityKind.LiveFat32StandardScanAvailable : ScanCapabilityKind.LiveNtfsStandardScanAvailable,
-            isFat32 ? "Capability.LiveFat32Available" : "Capability.LiveNtfsAvailable",
+            isExFat ? ScanCapabilityKind.LiveExFatStandardScanAvailable : isFat32 ? ScanCapabilityKind.LiveFat32StandardScanAvailable : ScanCapabilityKind.LiveNtfsStandardScanAvailable,
+            isExFat ? "Capability.LiveExFatAvailable" : isFat32 ? "Capability.LiveFat32Available" : "Capability.LiveNtfsAvailable",
             true,
             false,
             true,

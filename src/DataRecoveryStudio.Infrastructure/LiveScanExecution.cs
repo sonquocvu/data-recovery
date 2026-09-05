@@ -28,6 +28,7 @@ public sealed class WindowsVolumeOnlyLiveScanTargetValidator(IWindowsStorageNati
         {
             LiveScanScannerKind.NtfsStandardMetadata => "NTFS",
             LiveScanScannerKind.Fat32StandardMetadata => "FAT32",
+            LiveScanScannerKind.ExFatStandardMetadata => "exFAT",
             _ => throw new LiveScanTargetValidationException(LiveScanTerminalStatus.UnsupportedFileSystem, "UnknownScannerKind"),
         };
         if (!grant.FileSystem.Equals(expectedFileSystem, StringComparison.OrdinalIgnoreCase))
@@ -92,8 +93,25 @@ public sealed class WindowsVolumeOnlyLiveScanTargetValidator(IWindowsStorageNati
         IReadOnlyList<int> currentDiskNumbers;
         using (var handle = _native.OpenMetadataDevice(canonical, MetadataOpenOptions.ReadOnlyMetadata))
         {
-            currentDiskNumbers = NativeStorageParser.ParseDiskExtents(
-                _native.QueryDevice(handle, StorageNativeConstants.IoctlVolumeGetVolumeDiskExtents, []));
+            var extentBuffer = _native.QueryDevice(handle, StorageNativeConstants.IoctlVolumeGetVolumeDiskExtents, []);
+            currentDiskNumbers = NativeStorageParser.ParseDiskExtents(extentBuffer);
+            if (grant.ScannerKind == LiveScanScannerKind.ExFatStandardMetadata)
+            {
+                IReadOnlyList<VolumeDiskExtent> extents;
+                try { extents = NativeStorageParser.ParseVolumeExtents(extentBuffer); }
+                catch (InvalidDataException) { throw new LiveScanTargetValidationException(LiveScanTerminalStatus.TargetChanged, "InvalidExtents"); }
+                if (!LiveExFatValidation.ValidExtents(grant.Extents, capacity, currentDiskNumbers) || !extents.SequenceEqual(grant.Extents))
+                    throw new LiveScanTargetValidationException(LiveScanTerminalStatus.TargetChanged, "ExtentsChanged");
+                var discovery = new WindowsStorageDiscoveryService(_native);
+                var ids = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var number in currentDiskNumbers)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ids.Add(discovery.DiscoverPhysicalDisk(number, volumeName).Id.Value);
+                }
+                if (!ids.SetEquals(grant.PhysicalDeviceIdentities))
+                    throw new LiveScanTargetValidationException(LiveScanTerminalStatus.TargetChanged, "PhysicalIdentityChanged");
+            }
         }
 
         if (!grant.PhysicalDiskNumbers.ToHashSet().SetEquals(currentDiskNumbers))
@@ -163,7 +181,7 @@ public interface ILiveScanExecutor
         CancellationToken cancellationToken);
 }
 
-public sealed class LiveScanExecutor : ILiveScanExecutor
+public sealed partial class LiveScanExecutor : ILiveScanExecutor
 {
     private readonly ILiveScanTargetValidator _targetValidator;
     private readonly ILiveVolumeSourceFactory _sourceFactory;
@@ -200,10 +218,11 @@ public sealed class LiveScanExecutor : ILiveScanExecutor
         ArgumentNullException.ThrowIfNull(grant);
         var validated = await _targetValidator.ValidateAsync(grant, cancellationToken).ConfigureAwait(false);
         var budgets = LiveScanHardLimits.Clamp(requestedBudgets);
-        var consistencyOverhead = checked(2L * (LiveScanProtocol.MaximumIndividualReadBytes + 512));
+        var consistencyOverhead = grant.ScannerKind == LiveScanScannerKind.ExFatStandardMetadata ? 0 : checked(2L * (LiveScanProtocol.MaximumIndividualReadBytes + 512));
         await using var source = _sourceFactory.Open(validated.Grant, checked(budgets.MaximumBytesRead + consistencyOverhead));
         return grant.ScannerKind switch
         {
+            LiveScanScannerKind.ExFatStandardMetadata => await ExecuteExFatAsync(sessionId, source, budgets, progress, cancellationToken).ConfigureAwait(false),
             LiveScanScannerKind.NtfsStandardMetadata => await ExecuteNtfsAsync(sessionId, source, budgets, progress, cancellationToken).ConfigureAwait(false),
             LiveScanScannerKind.Fat32StandardMetadata => await ExecuteFat32Async(sessionId, grant, source, budgets, progress, cancellationToken).ConfigureAwait(false),
             _ => throw new LiveScanTargetValidationException(LiveScanTerminalStatus.UnsupportedFileSystem, "UnknownScannerKind"),

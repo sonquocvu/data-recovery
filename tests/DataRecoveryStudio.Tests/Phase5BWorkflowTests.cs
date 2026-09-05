@@ -25,7 +25,7 @@ public sealed class Phase5BWorkflowTests
     [InlineData("NTFS", true, ScanCapabilityKind.LiveNtfsStandardScanAvailable, true)]
     [InlineData("NTFS", false, ScanCapabilityKind.LiveStandardScanFeatureDisabled, false)]
     [InlineData("FAT32", true, ScanCapabilityKind.LiveFat32StandardScanFeatureDisabled, false)]
-    [InlineData("exFAT", true, ScanCapabilityKind.UnsupportedFilesystem, false)]
+    [InlineData("exFAT", true, ScanCapabilityKind.LiveExFatStandardScanFeatureDisabled, false)]
     [InlineData("ReFS", true, ScanCapabilityKind.UnsupportedFilesystem, false)]
     public void CapabilityMapping_IsExplicit(string filesystem, bool flag, ScanCapabilityKind expected, bool canStart)
     {

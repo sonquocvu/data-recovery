@@ -70,7 +70,7 @@ flowchart LR
   Estimate --> Catalog[Incremental result catalog]
 ```
 
-The Phase 4B standard scanner uses isolated NTFS parsing behind `IReadOnlyRandomAccessSource`; no writable stream or native handle reaches it. It derives the MFT layout from record zero, traverses fragmented virtual extents, resolves bounded attribute-list extensions, reconstructs hard-link paths, and queries `$Bitmap` through a bounded cache. Phase 4C reuses that production parser for source/record/stream revalidation and streams supported image payload bytes to a separate validated destination. Phase 7A/7B use the same ordinary-file-only abstraction for FAT32 metadata and selected payload clusters; exFAT remains unimplemented.
+The Phase 4B standard scanner uses isolated NTFS parsing behind `IReadOnlyRandomAccessSource`; no writable stream or native handle reaches it. It derives the MFT layout from record zero, traverses fragmented virtual extents, resolves bounded attribute-list extensions, reconstructs hard-link paths, and queries `$Bitmap` through a bounded cache. Phase 4C reuses that production parser for source/record/stream revalidation and streams supported image payload bytes to a separate validated destination. Phase 7A/7B use the same ordinary-file-only abstraction for FAT32 metadata and selected payload clusters; Phase 8A/8B extend the headless image services to conservative exFAT scanning and recovery.
 
 ## Phase 4C image-recovery pipeline
 
@@ -89,3 +89,18 @@ Expected media failures are typed, recoverable records associated with offsets. 
 ## Raw-device isolation and privilege
 
 Phase 5A/7C isolate live volume access in a one-shot elevated worker. The parent grants only a current discovered eligible mounted NTFS or independently gated FAT32 volume, creates a random current-user-only named pipe, authenticates the worker with a per-session nonce, and accepts bounded normalized metadata only. Scanner kind and filesystem are bound end to end. The live handle is `GENERIC_READ`, share mode 7, `OPEN_EXISTING`, and overlapped; no physical-disk scan or arbitrary-offset command exists. WPF remains `asInvoker`, launches only after an enabled Standard Scan is explicitly started, and cannot invoke live recovery. See `phase-5a-live-ntfs-scan.md` and `phase-7c-live-fat32-standard-scan.md`.
+
+## Phase 8A addition
+
+The headless exFAT image service follows the existing project boundaries: immutable exFAT contracts in Core, session/consistency orchestration in Application, and source validation/binary parsing in Infrastructure. No App or ScanWorker composition changes are introduced. See [Phase 8A](phase-8a-exfat-image-metadata.md) for the supported metadata subset and internal future-recovery provenance. Phase 7D hardware validation remains deferred.
+
+## Phase 8B addition
+
+`ExFatRecoveryModels` defines immutable public ID-only requests and results. `ExFatImageScanService` also implements `IExFatImageRecoveryService`; its private registry creates single-use plans from completed owned sessions. `ExFatImageRecoveryEngine` refreshes the production `ExFatMetadataScanner` once per batch. An internal result seal binds fresh layouts to the actual parser result; no recovery parser or caller-supplied extents are introduced. Selected layouts are retained only during this refresh.
+
+The engine stages exact initialized-byte copies plus logical zero tails, checks source consistency for the batch, then uses shared destination sanitation, collision handling, publication, and independent SHA-256 rereads. `RegularFileIdentity` binds held ordinary-file handles to Windows volume/file IDs; `RecoveryDirectoryLease` holds destination ancestors stable through publication and cleanup. Shared regular-file reads disable managed read-ahead. App/ScanWorker composition and live gates are unchanged. See [Phase 8B](phase-8b-exfat-image-recovery.md).
+
+
+## Phase 8C live metadata integration
+
+The existing live worker now routes an independently gated exFAT scanner kind directly to the production Phase 8A metadata parser. Core presentation DTOs omit recovery authority and payload; Application keeps grants, workflow and recovery lockout separate; Infrastructure owns bounded reads, metadata sampling and revalidation. Protocol v4 binds scanner kind throughout. Image services and Phase 8B destination/publication components remain outside live composition. See [Phase 8C](phase-8c-live-exfat-standard-scan.md). Phase 7D hardware validation remains deferred.

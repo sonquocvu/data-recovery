@@ -18,6 +18,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly bool _isDevelopmentMode;
     private readonly bool _liveStandardScanEnabled;
     private readonly bool _liveFat32StandardScanEnabled;
+    private readonly bool _liveExFatStandardScanEnabled;
     private readonly ILiveScanUiOrchestrator? _liveOrchestrator;
     private PageKind? _pendingNavigation;
 
@@ -30,15 +31,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         bool isDevelopmentMode = false,
         bool liveStandardScanEnabled = false,
         ILiveScanUiOrchestrator? liveOrchestrator = null,
-        bool liveFat32StandardScanEnabled = false)
+        bool liveFat32StandardScanEnabled = false,
+        bool liveExFatStandardScanEnabled = false)
     {
         _isDevelopmentMode = isDevelopmentMode;
         _liveStandardScanEnabled = liveStandardScanEnabled;
         _liveFat32StandardScanEnabled = liveFat32StandardScanEnabled;
+        _liveExFatStandardScanEnabled = liveExFatStandardScanEnabled;
         _liveOrchestrator = liveOrchestrator;
         Localization = new LocalizedText(localization);
         ScanMode = new ScanModeViewModel(() => Navigate(PageKind.Devices), BeginScan, localization, isDevelopmentMode,
-            liveStandardScanEnabled, liveFat32StandardScanEnabled);
+            liveStandardScanEnabled, liveFat32StandardScanEnabled, liveExFatStandardScanEnabled);
         ScanProgress = new ScanProgressViewModel(scan, ScanFinished, localization, liveOrchestrator, LiveScanFinished);
         Results = new ResultsViewModel(catalog, isDevelopmentMode, localization);
         Settings = new SettingsViewModel(settings, localization, isDevelopmentMode);
@@ -60,8 +63,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public event EventHandler? ScanTerminal;
     public bool IsDevelopmentMode => _isDevelopmentMode;
     public bool IsLiveStandardScanEnabled => _liveStandardScanEnabled;
+    public bool IsLiveExFatStandardScanEnabled => _liveExFatStandardScanEnabled;
+    public bool IsAnyLiveStandardScanEnabled => _liveStandardScanEnabled || _liveFat32StandardScanEnabled || _liveExFatStandardScanEnabled;
     public bool IsLiveFat32StandardScanEnabled => _liveFat32StandardScanEnabled;
-    public bool IsProductionFeatureDisabled => !_isDevelopmentMode && !_liveStandardScanEnabled && !_liveFat32StandardScanEnabled;
+    public bool IsProductionFeatureDisabled => !_isDevelopmentMode && !_liveStandardScanEnabled && !_liveFat32StandardScanEnabled && !_liveExFatStandardScanEnabled;
 
     public PageKind CurrentPage
     {
@@ -266,6 +271,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var currentVolume = current.Volumes.SingleOrDefault();
         if (expectedVolume is null || currentVolume is null) return false;
         return expected.ConnectionStatus == current.ConnectionStatus &&
+            (!expectedVolume.FileSystem.Equals("exFAT", StringComparison.OrdinalIgnoreCase) || expectedVolume.Extents.SequenceEqual(currentVolume.Extents)) &&
             expectedVolume.VolumeGuidPath.Equals(currentVolume.VolumeGuidPath, StringComparison.OrdinalIgnoreCase) &&
             expectedVolume.MountPath.Equals(currentVolume.MountPath, StringComparison.OrdinalIgnoreCase) &&
             expectedVolume.FileSystem.Equals(currentVolume.FileSystem, StringComparison.OrdinalIgnoreCase) &&

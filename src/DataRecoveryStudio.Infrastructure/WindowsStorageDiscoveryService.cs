@@ -116,7 +116,7 @@ public sealed class WindowsStorageDiscoveryService : IProductionDeviceDiscoveryS
 
         cancellationToken.ThrowIfCancellationRequested();
         var driveType = preferredPath.Length == 0 ? WindowsDriveType.Unknown : _native.GetDriveType(preferredPath);
-        var diskNumbers = TryGetDiskNumbers(volumeName);
+        var diskNumbers = TryGetDiskNumbers(volumeName, out var extents);
         var disks = new List<PhysicalDisk>();
         foreach (var diskNumber in diskNumbers)
         {
@@ -153,6 +153,7 @@ public sealed class WindowsStorageDiscoveryService : IProductionDeviceDiscoveryS
         var volume = new Volume(volumeName, preferredPath, displayName, fileSystem, total, used, identity)
         {
             VolumeGuidPath = volumeName,
+            Extents = extents,
             MountPaths = mountPaths,
             PhysicalDeviceIds = physicalIds,
             Availability = availability,
@@ -167,12 +168,15 @@ public sealed class WindowsStorageDiscoveryService : IProductionDeviceDiscoveryS
         };
     }
 
-    private IReadOnlyList<int> TryGetDiskNumbers(string volumeName)
+    private IReadOnlyList<int> TryGetDiskNumbers(string volumeName, out IReadOnlyList<VolumeDiskExtent> extents)
     {
+        extents = [];
         try
         {
             using var handle = _native.OpenMetadataDevice(volumeName.TrimEnd('\\'), MetadataOpenOptions.ReadOnlyMetadata);
             var buffer = _native.QueryDevice(handle, StorageNativeConstants.IoctlVolumeGetVolumeDiskExtents, []);
+            try { extents = NativeStorageParser.ParseVolumeExtents(buffer); }
+            catch (InvalidDataException) { /* Legacy discovery retains disk numbers; exFAT live authorization requires full extents. */ }
             return NativeStorageParser.ParseDiskExtents(buffer);
         }
         catch (Exception exception)
@@ -182,7 +186,7 @@ public sealed class WindowsStorageDiscoveryService : IProductionDeviceDiscoveryS
         }
     }
 
-    private PhysicalDisk DiscoverPhysicalDisk(int diskNumber, string volumeName)
+    internal PhysicalDisk DiscoverPhysicalDisk(int diskNumber, string volumeName)
     {
         StorageDescriptor? descriptor = null;
         bool? incursSeekPenalty = null;

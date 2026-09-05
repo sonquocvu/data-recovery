@@ -40,7 +40,8 @@ internal static class RecoveryFilePublication
         string path,
         int bufferSize,
         long maximumBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<int>? bytesRead = null)
     {
         using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
@@ -52,6 +53,7 @@ internal static class RecoveryFilePublication
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var read = await stream.ReadAsync(buffer.AsMemory(0, bufferSize), cancellationToken).ConfigureAwait(false);
+                bytesRead?.Invoke(read);
                 if (read == 0) break;
                 if (total > maximumBytes - read) throw new IOException("The post-write verification byte budget was reached.");
                 hasher.AppendData(buffer, 0, read);
@@ -88,5 +90,15 @@ internal static class RecoveryFilePublication
 
             return false;
         }
+    }
+
+    internal static bool CleanupOwned(string path, RegularFileIdentity identity, int maximumAttempts)
+    {
+        for (var attempt = 0; attempt < maximumAttempts; attempt++)
+        {
+            try { if (RecoveryOwnedFileDeletion.TryDelete(path, identity)) return true; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException) { }
+        }
+        return false;
     }
 }

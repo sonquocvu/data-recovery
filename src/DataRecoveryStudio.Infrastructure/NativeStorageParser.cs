@@ -51,6 +51,23 @@ public static class NativeStorageParser
         return result;
     }
 
+    public static IReadOnlyList<VolumeDiskExtent> ParseVolumeExtents(ReadOnlySpan<byte> buffer)
+    {
+        if (buffer.Length < 8) throw new InvalidDataException("Extent header truncated.");
+        var count = BinaryPrimitives.ReadUInt32LittleEndian(buffer);
+        if (count is < 1 or > 128 || buffer.Length < 8 + count * 24) throw new InvalidDataException("Extent count invalid.");
+        var extents = new List<VolumeDiskExtent>();
+        for (var i = 0; i < count; i++)
+        {
+            var entry = buffer.Slice(8 + i * 24, 24);
+            extents.Add(new(BinaryPrimitives.ReadInt32LittleEndian(entry),
+                BinaryPrimitives.ReadInt64LittleEndian(entry[8..]), BinaryPrimitives.ReadInt64LittleEndian(entry[16..])));
+        }
+        if (!LiveExFatValidation.ValidExtents(extents, 1, extents.Select(e => e.DiskNumber)))
+            throw new InvalidDataException("Extent geometry invalid.");
+        return extents;
+    }
+
     public static IReadOnlyList<int> ParseDiskExtents(ReadOnlySpan<byte> buffer)
     {
         if (buffer.Length < sizeof(uint))

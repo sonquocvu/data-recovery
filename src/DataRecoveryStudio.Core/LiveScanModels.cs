@@ -5,7 +5,7 @@ namespace DataRecoveryStudio.Core;
 
 public static class LiveScanProtocol
 {
-    public const int Version = 3;
+    public const int Version = 4;
     public const int MaximumMessageBytes = 1024 * 1024;
     public const int MaximumStringCharacters = 32 * 1024;
     public const int MaximumDiagnostics = 1_000;
@@ -14,7 +14,7 @@ public static class LiveScanProtocol
     public const int MaximumDiagnosticBatchSize = 128;
     public const int MaximumSerializerDepth = 16;
     public const int MaximumIndividualReadBytes = 1024 * 1024;
-    public const string WorkerVersion = "7D.1";
+    public const string WorkerVersion = "8C.1";
 }
 
 public enum LiveScanScannerKind
@@ -22,6 +22,7 @@ public enum LiveScanScannerKind
     Unknown = 0,
     NtfsStandardMetadata = 1,
     Fat32StandardMetadata = 2,
+    ExFatStandardMetadata = 3,
 }
 
 public static class CanonicalVolumeGuidPath
@@ -111,6 +112,7 @@ public sealed record LiveScanTargetGrant(
 {
     public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.Unknown;
     public Guid CorrelationId { get; init; }
+    public IReadOnlyList<VolumeDiskExtent> Extents { get; init; } = [];
 }
 
 public sealed record LiveScanBudgets(
@@ -251,13 +253,20 @@ public sealed record LiveScanCandidateDto(
     public DateTimeOffset? LastAccessedAt { get; init; }
     public DateTimeOffset? ModifiedAt { get; init; }
     public byte AttributeFlags { get; init; }
+    public LiveExFatMetadata? ExFat { get; init; }
 }
 
-public sealed record LiveScanCandidateBatchDto(int Sequence, IReadOnlyList<LiveScanCandidateDto> Candidates);
+public sealed record LiveScanCandidateBatchDto(int Sequence, IReadOnlyList<LiveScanCandidateDto> Candidates)
+{
+    public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.NtfsStandardMetadata;
+}
 
 public sealed record LiveScanDiagnosticDto(string Code, ScanDiagnosticSeverity Severity, string Operation);
 
-public sealed record LiveScanDiagnosticBatchDto(int Sequence, IReadOnlyList<LiveScanDiagnosticDto> Diagnostics);
+public sealed record LiveScanDiagnosticBatchDto(int Sequence, IReadOnlyList<LiveScanDiagnosticDto> Diagnostics)
+{
+    public LiveScanScannerKind ScannerKind { get; init; } = LiveScanScannerKind.NtfsStandardMetadata;
+}
 
 public sealed record LiveScanTerminalResultDto(
     LiveScanTerminalStatus Status,
@@ -283,6 +292,7 @@ public sealed record LiveScanTerminalResultDto(
     public string? ConsistencyEvidenceBefore { get; init; }
     public string? ConsistencyEvidenceAfter { get; init; }
     public bool SourceHandleDisposed { get; init; }
+    public LiveExFatEvidence? ExFat { get; init; }
     public string? Fat32ScannerVersion { get; init; }
     public Fat32BootRelationship? Fat32BootRelationshipAfter { get; init; }
     public string? Fat32GeometryEvidenceBefore { get; init; }

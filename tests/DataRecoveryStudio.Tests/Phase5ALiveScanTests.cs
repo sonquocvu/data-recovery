@@ -435,10 +435,12 @@ public sealed class Phase5ALiveScanTests
         Assert.Throws<InvalidOperationException>(() => resolver.Resolve("E:\\InstalledApp"));
     }
 
-    [Fact]
-    public async Task ParentMapsUacDenialMissingWorkerCrashAndPreLaunchCancellationSeparately()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ParentMapsUacDenialMissingWorkerCrashAndPreLaunchCancellationSeparately(bool exFat)
     {
-        var grant = IssueGrant(CreateDevice());
+        var grant = exFat ? Phase8CLiveExFatTests.Grant() : IssueGrant(CreateDevice());
         var resolver = new TrustedScanWorkerPathResolver(new FakeTrustedFileSystem());
         var declined = await new NamedPipeLiveScanWorkerClient("E:\\InstalledApp", resolver, new ThrowingLauncher(new Win32Exception(1223)))
             .ScanAsync(grant, new LiveScanBudgets(), null, CancellationToken.None);

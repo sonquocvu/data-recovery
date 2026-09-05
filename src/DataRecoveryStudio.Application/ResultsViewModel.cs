@@ -41,7 +41,7 @@ public sealed class ResultItemViewModel : ObservableObject
         : this(ToRecoverableFile(candidate, sourceDeviceId), localization)
     {
         LiveCandidate = candidate;
-        StatusLabelKey = candidate.ScannerKind == LiveScanScannerKind.Fat32StandardMetadata && candidate.Fat32Allocation is { } allocation
+        StatusLabelKey = candidate.ExFat is { } exFat ? $"ExFatAllocation.{exFat.Allocation}" : candidate.ScannerKind == LiveScanScannerKind.Fat32StandardMetadata && candidate.Fat32Allocation is { } allocation
             ? $"Fat32Allocation.{allocation}"
             : $"LiveRecoverability.{candidate.Recoverability}";
         StatusTone = candidate.Recoverability switch
@@ -57,10 +57,19 @@ public sealed class ResultItemViewModel : ObservableObject
     public LiveScanCandidateDto? LiveCandidate { get; }
     public bool IsLiveResult => LiveCandidate is not null;
     public bool IsFat32LiveResult => LiveCandidate?.ScannerKind == LiveScanScannerKind.Fat32StandardMetadata;
+    public bool IsExFatLiveResult => LiveCandidate?.ExFat is not null;
+    public bool HasNameEvidence => IsFat32LiveResult || IsExFatLiveResult;
+    public string ValidDataLength => LiveCandidate?.ExFat is { } e ? ByteFormatter.Format(e.ValidDataLength) : string.Empty;
+    public string ExFatLayout => LiveCandidate?.ExFat is { } e ? Localize($"ExFatLayout.{e.Layout}", e.Layout.ToString()) : string.Empty;
+    public string ExFatMetadataState => LiveCandidate?.ExFat is { } e
+        ? Localize(e.IsPartial ? "ExFatMetadata.Partial" : e.MetadataDamaged ? "ExFatMetadata.Damaged" : "ExFatMetadata.BestEffort", "Live metadata") : string.Empty;
+    public string ExFatTimestamps => LiveCandidate?.ExFat is { } e
+        ? string.Join(Environment.NewLine, Timestamp("Results.Created", e.Created), Timestamp("Results.Modified", e.Modified), Timestamp("Results.Accessed", e.Accessed)) : string.Empty;
+    private string Timestamp(string label, ExFatTimestamp value) => $"{Localize(label, label)}: {value.LocalTime?.ToString("g") ?? Localize("Common.Unknown", "Unknown")} ({Localize($"ExFatTimestamp.{value.State}", value.State.ToString())}{(value.UtcOffsetMinutes is { } offset ? $", UTC{(offset < 0 ? "-" : "+")}{Math.Abs(offset) / 60:00}:{Math.Abs(offset) % 60:00}" : string.Empty)})";
     public string Name => File.Name;
     public string OriginalPath => File.OriginalPath;
     public string Size => ByteFormatter.Format(File.SizeBytes);
-    public string Modified => File.ModifiedAt?.LocalDateTime.ToString("g") ?? Localize("Common.Unknown", "Unknown");
+    public string Modified => LiveCandidate?.ExFat is { } e ? $"{e.Modified.LocalTime?.ToString("g")} ({Localize($"ExFatTimestamp.{e.Modified.State}", e.Modified.State.ToString())})" : File.ModifiedAt?.LocalDateTime.ToString("g") ?? Localize("Common.Unknown", "Unknown");
     public string Category => Localize($"Category.{File.Category}", File.Category.ToString());
     public string Status => Localize(StatusLabelKey, File.Recoverability.ToString());
     public string StatusLabelKey { get; }
@@ -68,13 +77,13 @@ public sealed class ResultItemViewModel : ObservableObject
     public string PreviewDescription => IsLiveResult
         ? Localize("Preview.LiveMetadataOnly", "Content preview is not enabled for live scans yet.")
         : Localize($"Preview.Description.{File.Category}", File.PreviewDescription);
-    public string PathState => LiveCandidate is null ? string.Empty : IsFat32LiveResult && LiveCandidate.Fat32PathState is { } fatPath
+    public string PathState => LiveCandidate?.ExFat is { } e ? Localize($"ExFatPath.{e.PathState}", e.PathState.ToString()) : LiveCandidate is null ? string.Empty : IsFat32LiveResult && LiveCandidate.Fat32PathState is { } fatPath
         ? Localize($"Fat32PathState.{fatPath}", fatPath.ToString())
         : Localize($"LivePathState.{LiveCandidate.PathState}", LiveCandidate.PathState.ToString());
-    public string NameConfidence => LiveCandidate?.Fat32NameState is { } nameState
+    public string NameConfidence => LiveCandidate?.ExFat is { } e ? Localize($"ExFatName.{e.NameEvidence}", e.NameEvidence.ToString()) : LiveCandidate?.Fat32NameState is { } nameState
         ? Localize($"Fat32NameState.{nameState}", nameState.ToString())
         : string.Empty;
-    public string AttributeFlags => IsFat32LiveResult ? $"0x{LiveCandidate!.AttributeFlags:X2}" : string.Empty;
+    public string AttributeFlags => LiveCandidate?.ExFat is { } e ? $"0x{e.Attributes:X4}" : IsFat32LiveResult ? $"0x{LiveCandidate!.AttributeFlags:X2}" : string.Empty;
     public string LayoutWarning => LiveCandidate?.Streams.Any(stream =>
         stream.IsCompressed || stream.IsEncrypted || stream.IsSparse || stream.Storage == NtfsDataStorage.Unknown) == true
         ? Localize("Results.UnsupportedLayoutWarning", "This stream layout is not supported for content recovery.")
@@ -107,6 +116,10 @@ public sealed class ResultItemViewModel : ObservableObject
         OnPropertyChanged(nameof(NameConfidence));
         OnPropertyChanged(nameof(AttributeFlags));
         OnPropertyChanged(nameof(LayoutWarning));
+        OnPropertyChanged(nameof(ValidDataLength));
+        OnPropertyChanged(nameof(ExFatLayout));
+        OnPropertyChanged(nameof(ExFatMetadataState));
+        OnPropertyChanged(nameof(ExFatTimestamps));
     }
 
     private static RecoverableFile ToRecoverableFile(LiveScanCandidateDto candidate, PhysicalDeviceId sourceDeviceId) => new(
@@ -156,6 +169,9 @@ public sealed class ResultsViewModel : ObservableObject
                 OnPropertyChanged(nameof(SortChoices));
                 OnPropertyChanged(nameof(VisibleCountText));
                 OnPropertyChanged(nameof(ScanSummary));
+                OnPropertyChanged(nameof(Subtitle));
+                OnPropertyChanged(nameof(ResultSafetyNotice));
+                OnPropertyChanged(nameof(RecoveryDisabledReason));
                 foreach (var item in _allResults)
                 {
                     item.RefreshLocalizedText();
@@ -187,6 +203,7 @@ public sealed class ResultsViewModel : ObservableObject
     public LiveScanUiSession? LiveSession => _liveSession;
     public bool IsLiveSession => _liveSession is not null;
     public bool IsLiveFat32Session => _liveSession?.Result.Terminal.ScannerKind == LiveScanScannerKind.Fat32StandardMetadata;
+    public bool IsLiveExFatSession => _liveSession?.Result.Terminal.ScannerKind == LiveScanScannerKind.ExFatStandardMetadata;
     public bool IsMockSession => !IsLiveSession;
     public int TotalCount => _allResults.Count;
     public int VisibleCount => VisibleResults.Count;
@@ -201,8 +218,9 @@ public sealed class ResultsViewModel : ObservableObject
         : _allResults.Where(item => item.IsSelected).Select(item => item.File).ToArray();
     public bool HasScanSummary => IsLiveSession || Session?.State == ScanState.Completed;
     public string ScanSummary => BuildScanSummary();
+    public string Subtitle => Localize(IsLiveSession ? "Results.LiveSubtitle" : "Results.Subtitle", "Inspect result metadata.");
     public string ResultSafetyNotice => IsLiveSession
-        ? IsLiveFat32Session
+        ? IsLiveExFatSession ? Localize("Results.LiveExFatAllocationNotice", "Live metadata is best effort. Name evidence does not establish content recoverability.") : IsLiveFat32Session
             ? Localize("Results.LiveFat32AllocationNotice", "FAT32 deletion may erase cluster-chain information. Allocation status cannot prove that file contents are intact.")
             : Localize("Results.LiveAllocationNotice", "Allocation status is only an estimate and cannot guarantee that file contents are intact.")
         : Localize("Results.MockEstimateNotice", "Recoverability is a mock estimate, not a recovery guarantee.");
@@ -210,7 +228,7 @@ public sealed class ResultsViewModel : ObservableObject
         ? Localize("Results.LiveRecoveryDisabled", "Live recovery is not enabled yet.")
         : string.Empty;
     public bool WasTruncated => _liveSession is { } live &&
-        (live.Result.Terminal.CandidateCount >= LiveScanProtocol.MaximumCandidates ||
+        (live.Result.Terminal.ExFat?.BudgetLimited == true || live.Result.Terminal.CandidateCount >= LiveScanProtocol.MaximumCandidates ||
          live.Result.Terminal.ReasonCode?.Contains("Budget", StringComparison.OrdinalIgnoreCase) == true ||
          live.Result.Terminal.ReasonCode?.Contains("Limit", StringComparison.OrdinalIgnoreCase) == true ||
          live.Result.Terminal.ReasonCode?.Contains("Truncat", StringComparison.OrdinalIgnoreCase) == true);
@@ -363,15 +381,15 @@ public sealed class ResultsViewModel : ObservableObject
             return;
         }
 
-        timer.Stop();
-        LastIngestionDurationMilliseconds = timer.Elapsed.TotalMilliseconds;
-        OnPropertyChanged(nameof(LastIngestionDurationMilliseconds));
         _allResults.Clear();
         _allResults.AddRange(mapped);
         SubscribeToSelectionChanges();
         State = _allResults.Count == 0 ? ResultsDisplayState.Empty : ResultsDisplayState.Completed;
         OnPropertyChanged(nameof(CategoryOptions));
         ApplyFilterAndSort();
+        timer.Stop();
+        LastIngestionDurationMilliseconds = timer.Elapsed.TotalMilliseconds;
+        OnPropertyChanged(nameof(LastIngestionDurationMilliseconds));
     }
 
     public void LoadFiles(IEnumerable<RecoverableFile> files)
@@ -501,6 +519,7 @@ public sealed class ResultsViewModel : ObservableObject
         {
             LiveScanScannerKind.NtfsStandardMetadata => "NTFS",
             LiveScanScannerKind.Fat32StandardMetadata => "FAT32",
+            LiveScanScannerKind.ExFatStandardMetadata => "exFAT",
             _ => throw new InvalidDataException("The live result declared an unknown scanner."),
         };
         if (result.Candidates.Count > LiveScanProtocol.MaximumCandidates ||
@@ -509,7 +528,8 @@ public sealed class ResultsViewModel : ObservableObject
             !result.Terminal.FileSystem.Equals(expectedFileSystem, StringComparison.OrdinalIgnoreCase) ||
             result.Candidates.Any(candidate => candidate.SourceSessionId != result.SessionId ||
                 candidate.ScannerKind != scannerKind || !candidate.FileSystem.Equals(expectedFileSystem, StringComparison.OrdinalIgnoreCase) ||
-                candidate.CandidateId == Guid.Empty || candidate.Name.Length > LiveScanProtocol.MaximumStringCharacters ||
+                candidate.CandidateId == Guid.Empty ||
+                (scannerKind == LiveScanScannerKind.ExFatStandardMetadata ? !LiveExFatValidation.ValidCandidate(candidate) : candidate.ExFat is not null) || candidate.Name.Length > LiveScanProtocol.MaximumStringCharacters ||
                 candidate.OriginalPath.Length > LiveScanProtocol.MaximumStringCharacters ||
                 (scannerKind == LiveScanScannerKind.Fat32StandardMetadata &&
                     (candidate.MftRecordNumber != 0 || candidate.SequenceNumber != 0 || candidate.Streams.Count != 0 ||
@@ -521,6 +541,14 @@ public sealed class ResultsViewModel : ObservableObject
             throw new InvalidDataException("The live candidate catalog failed validation.");
         }
 
+        long size = 0, characters = 0;
+        foreach (var c in result.Candidates)
+        {
+            if (c.LogicalSize < 0 || c.LogicalSize > long.MaxValue - size) throw new InvalidDataException("Aggregate size overflow.");
+            size += c.LogicalSize;
+            characters += c.Name.Length + c.OriginalPath.Length;
+            if (characters > 16_000_000) throw new InvalidDataException("Aggregate text limit.");
+        }
         return result.Candidates
             .OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(candidate => candidate.MftRecordNumber)
@@ -545,10 +573,12 @@ public sealed class ResultsViewModel : ObservableObject
         OnPropertyChanged(nameof(LiveSession));
         OnPropertyChanged(nameof(IsLiveSession));
         OnPropertyChanged(nameof(IsLiveFat32Session));
+        OnPropertyChanged(nameof(IsLiveExFatSession));
         OnPropertyChanged(nameof(IsMockSession));
         OnPropertyChanged(nameof(HasScanSummary));
         OnPropertyChanged(nameof(ScanSummary));
         OnPropertyChanged(nameof(ResultSafetyNotice));
+        OnPropertyChanged(nameof(Subtitle));
         OnPropertyChanged(nameof(RecoveryDisabledReason));
         OnPropertyChanged(nameof(WasTruncated));
         OnPropertyChanged(nameof(IsPartialLiveResult));
@@ -579,10 +609,10 @@ public sealed class ResultsViewModel : ObservableObject
             var liveVolume = live.Source.Volumes.FirstOrDefault();
             var liveStatus = Localize($"LiveStatus.{live.Result.Terminal.Status}", live.Result.Terminal.Status.ToString());
             var truncated = WasTruncated ? Localize("Results.BudgetReached", "Safety budget reached") : Localize("Results.NotTruncated", "Not truncated");
-            if (live.Result.Terminal.ScannerKind == LiveScanScannerKind.Fat32StandardMetadata)
+            if (live.Result.Terminal.ScannerKind is LiveScanScannerKind.Fat32StandardMetadata or LiveScanScannerKind.ExFatStandardMetadata)
             {
                 return string.Format(
-                    Localize("Results.LiveFat32ScanSummary", "{0} ({1}) · FAT32 · Standard Scan · Live/read-only · {2} · {3} · {4:N0} directories · {5:N0} directory entries · {6:N0} FAT entries · {7:N0} candidates · {8}"),
+                    Localize(IsLiveExFatSession ? "Results.LiveExFatScanSummary" : "Results.LiveFat32ScanSummary", "{0} ({1}) · FAT32 · Standard Scan · Live/read-only · {2} · {3} · {4:N0} directories · {5:N0} directory entries · {6:N0} FAT entries · {7:N0} candidates · {8}"),
                     live.Source.DisplayName,
                     liveVolume is null ? string.Empty : DeviceDisplayFormatter.FormatMountPath(liveVolume.MountPath),
                     liveStatus,
